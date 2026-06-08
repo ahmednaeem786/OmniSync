@@ -2,10 +2,13 @@ import os
 import time
 import socket
 import requests
+import threading
+import pyperclip
 from dotenv import load_dotenv
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
@@ -107,6 +110,20 @@ def derive_shared_key(private_key, target_public_key_pem):
 
     return aes_key
 
+def decrypt_incoming_payload(aes_key, raw_packet):
+    """
+    Seperates the 12-byte nonce from the ciphertext and decrypts it.
+    """
+    try:
+        aesgcm = AESGCM(aes_key)
+        nonce = raw_packet[:12] #First 12 bytes are the nonce
+        ciphertext = raw_packet[12:] #The rest is the encrypted data
+        decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None) #Decrypting the data
+        return decrypted_bytes.decode('utf-8') #Converting bytes back to a string
+    except Exception as e:
+        print(f"Decryption Failed :( The packet may be corrupted: {e}")
+        return None
+
 def start_p2p_listener(aes_key):
     """
     Opens a secure, local network socket port to listen for incoming data from iPad
@@ -126,10 +143,64 @@ def start_p2p_listener(aes_key):
             encrypted_data = conn.recv(4096)
             if encrypted_data:
                 print(f"Recieved encrypted payload from {addr[0]}")
+
+                plaintext = decrypt_incoming_payload(aes_key, encrypted_data)
+
+                if plaintext:
+                    print(f"Decrypted Payload: '{plaintext}'")
+
+                    pyperclip.copy(plaintext)
+                    print("Successfully updated local clipboard with the new data!")
         except Exception as e:
             print(f"Tunnel Error: {e}")
         finally:
             conn.close()
+
+def send_secure_payload(target_ip, aes_key, plaintext_data):
+    """
+    Encrypts data using AES-GCM and pushes it directly to the target node.
+    """
+    try:
+        aesgcm = AESGCM(aes_key) # Initializing AES-GCM with our shared key
+        nonce = os.urandom(12) # Generating a random 12-byte nonce (Number used ONCE) for this specific message
+        encrypted_payload = aesgcm.encrypt(nonce, plaintext_data.encode('utf-8'), None) # Encrypting the plaintext string
+        final_packet = nonce + encrypted_payload # Packaging the nonce and the encrypted data together (reciever needs nonce to decrpyt it)
+        
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #Opening an outbound TCP socket connection
+        client_socket.settimeout(5) #Not hanging forever if the target drops.
+
+        print(f"Connecting directly to target node at {target_ip}:{PORT}...")
+        client_socket.connect((target_ip, PORT)) #Connecting to the target's IP and the agreed upon port number
+
+        client_socket.sendall(final_packet) # Streaming raw bytes
+        print("Encrypted payload successfully transmitted!")
+
+    except Exception as e:
+        print(f"Failed to send data to target: {e}")
+    finally:
+        client_socket.close()
+
+def monitor_clipboard_and_send(target_ip, aes_key):
+    """
+    Continuously monitors the clipboard for changes and sends new data to the target.
+    """
+    last_clipboard_content = pyperclip.paste()
+
+    while True:
+        try:
+            current_content = pyperclip.paste()
+
+            # If clipboard has text, and it's diffrent than the last thing we checked
+            if current_content and current_content != last_clipboard_content:
+                print(f"\n New Clipboard text detected: '{current_content[:20]}'")
+
+                send_secure_payload(target_ip, aes_key, current_content)
+
+                last_clipboard_content = current_content
+        except Exception as e:
+            pass # Completely ignoring clipboard lock errors thrown by Windows sometimes #TODO:
+
+        time.sleep(1.5) #Checking the clipboard every 1.5 seconds, can be adjusted for more or less sensitivity
 
 def main():
 
@@ -150,7 +221,14 @@ def main():
     aes_key = derive_shared_key(private_key, target_public_key)
     print("Cryptographic key successfully locked in memory.")
 
-    start_p2p_listener(aes_key) #Listening for the iPad to send things
+    listener_thread = threading.Thread(
+        target=start_p2p_listener, 
+        args=(aes_key,), 
+        daemon=True
+        )
+    listener_thread.start()
+    
+    monitor_clipboard_and_send(target_ip, aes_key)
 
 if __name__ == "__main__":
     main()
