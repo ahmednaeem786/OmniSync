@@ -17,7 +17,8 @@ load_dotenv()
 SYNC_CHANNEL = os.getenv("OMNISYNC_CHANNEL", "omnisync-default-fallback-channel")
 SIGNALING_SERVER = os.getenv("SIGNALING_SERVER", "https://dweet.cc")
 MY_ROLE = "laptop"
-TARGET_ROLE = "ipad"
+TARGET_ROLE = "android" # bubye apple, sorry you're too restrictive atp :((((( i tried my best but not worth the headache of dealing with a swift app :( cya
+
 PORT = 53317
 
 def get_local_ip():
