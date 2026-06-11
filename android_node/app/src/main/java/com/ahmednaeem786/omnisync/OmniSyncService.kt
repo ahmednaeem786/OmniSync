@@ -19,6 +19,11 @@ import java.net.ServerSocket
 import java.net.Socket
 import kotlin.concurrent.thread
 
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.NetworkInterface
+import java.net.URL
+
 class OmniSyncService: Service() {
 
     private val TAG = "OmniSyncService"
@@ -38,14 +43,15 @@ class OmniSyncService: Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "Service Started")
 
+        // Post the persistent notification
         val notification = createNotification()
         startForeground(1, notification)
 
-        aesKey = ByteArray(32) {0.toByte() }
-
         if (!isRunning) {
             isRunning = true
-            startTcpListener()
+            // INSTEAD of starting the TCP listener with a dummy key,
+            // we kick off the handshake.
+            performHandshake()
         }
 
         return START_STICKY
@@ -129,6 +135,82 @@ class OmniSyncService: Service() {
             )
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(serviceChannel)
+        }
+    }
+
+    private fun getLocalIpAddress(): String {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val networkInterface = interfaces.nextElement()
+                val addresses = networkInterface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement()
+
+                    if (!address.isLoopbackAddress && address is java.net.Inet4Address) {
+                        return address.hostAddress ?: "127.0.0.1"
+                    }
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return "127.0.0.1"
+    }
+
+    private fun performHandshake() {
+        thread(start = true, name = "HandshakeThread") {
+            try {
+                Log.i(TAG, "Starting Dweet Handshake...")
+
+                val channel = "omnisync-default-fallback-channel"
+
+                val keyPair = CryptoHelper.generateKeyPair()
+                val myPublicKeyStr = CryptoHelper.getPublicKeyString(keyPair)
+                val myIp = getLocalIpAddress()
+
+                val postUrl = URL("https://dweet.cc/dweet/for/$channel-android")
+                val postConn = postUrl.openConnection() as HttpURLConnection
+                postConn.requestMethod = "POST"
+                postConn.setRequestProperty("Content-Type", "application/json")
+                postConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                postConn.doOutput = true
+
+                val payload = JSONObject().apply {
+                    put("ip", myIp)
+                    put("public_key", myPublicKeyStr)
+                }
+                postConn.outputStream.write(payload.toString().toByteArray())
+                Log.d(TAG, "Broadcast sent. Server Response: ${postConn.responseCode}")
+
+                val getUrl = URL("https://dweet.cc/get/latest/dweet/for/$channel-laptop")
+                var laptopPubKey: String? = null
+
+                while (laptopPubKey == null && isRunning) {
+                    val getConn = getUrl.openConnection() as HttpURLConnection
+                    getConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+                    if (getConn.responseCode == 200) {
+                        val response = getConn.inputStream.bufferedReader().readText()
+                        val json = JSONObject(response)
+
+                        if (json.has("with")) {
+                            val content = json.getJSONArray("with").getJSONObject(0).getJSONObject("content")
+                            val laptopIp = content.getString("ip")
+                            laptopPubKey = content.getString("public_key")
+                            Log.i(TAG, "Found Laptop at IP: $laptopIp")
+                        }
+                    }
+                    if (laptopPubKey == null) Thread.sleep(3000)
+                }
+
+                if (laptopPubKey != null) {
+                    aesKey = CryptoHelper.deriveSharedKey(keyPair.private, laptopPubKey)
+                    Log.i(TAG, "Success!! Phase 1 Complete. E2EE Key Locked.")
+
+                    startTcpListener()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Handshake Error: ${e.message}")
+            }
         }
     }
 
