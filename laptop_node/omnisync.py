@@ -4,6 +4,7 @@ import socket
 import requests
 import threading
 import pyperclip
+import sqlite3
 from dotenv import load_dotenv
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
@@ -11,6 +12,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from datetime import datetime
 
 load_dotenv()
 
@@ -20,6 +22,39 @@ MY_ROLE = "laptop"
 TARGET_ROLE = "android" # bubye apple, sorry you're too restrictive atp :((((( i tried my best but not worth the headache of dealing with a swift app :( cya
 
 PORT = 53317
+
+def init_db():
+    """
+    Creates the local SQLite database to store clipboard history.
+    """
+    conn = sqlite3.connect('clipboard_history.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+                   CREATE TABLE IF NOT EXISTS clipboard_history (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   content TEXT NOT NULL,
+                   source_device TEXT NOT NULL,
+                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)
+                   ''')
+    conn.commit()
+    conn.close()
+
+def save_to_db(content, source_device):
+    """
+    Saves a new clipboard item into the database
+    """
+    try:
+        conn = sqlite3.connect('clipboard_history.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+                       INSERT INTO clipboard_history (content, source_device)
+                       VALUES (?, ?)
+                       ''', (content, source_device))
+        conn.commit()
+        conn.close()
+        print(f"Logged New Item from {source_device}")
+    except Exception as e:
+        print(f"Database Error: {e}")
 
 def get_local_ip():
     """
@@ -102,12 +137,9 @@ def derive_shared_key(private_key, target_public_key_pem):
     shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
 
     #Running the raw secret through a Key Derivation Function (HKDF in this case) to make it a safe 256-bit key for AES
-    aes_key = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=None,
-        info=b'omnisync-key-derivation',
-    ).derive(shared_secret)
+    digest = hashes.Hash(hashes.SHA256)
+    digest.update(shared_secret)
+    aes_key = digest.finalize()
 
     return aes_key
 
@@ -149,7 +181,7 @@ def start_p2p_listener(aes_key):
 
                 if plaintext:
                     print(f"Decrypted Payload: '{plaintext}'")
-
+                    save_to_db(plaintext, "android")
                     pyperclip.copy(plaintext)
                     print("Successfully updated local clipboard with the new data!")
         except Exception as e:
@@ -194,6 +226,7 @@ def monitor_clipboard_and_send(target_ip, aes_key):
             # If clipboard has text, and it's diffrent than the last thing we checked
             if current_content and current_content != last_clipboard_content:
                 print(f"\n New Clipboard text detected: '{current_content[:20]}'")
+                save_to_db(current_content, "laptop")
 
                 send_secure_payload(target_ip, aes_key, current_content)
 
@@ -206,6 +239,10 @@ def monitor_clipboard_and_send(target_ip, aes_key):
 def main():
 
     print("-----Starting a OmniSync Node-----")
+    
+    print("Initializing SQLite History Database...")
+    init_db()
+
     print(f"Using Channel ID: {SYNC_CHANNEL[:8]}...")
 
     local_ip = get_local_ip()
