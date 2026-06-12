@@ -232,10 +232,19 @@ def decrypt_incoming_payload(aes_key, raw_packet):
     """
     try:
         aesgcm = AESGCM(aes_key)
-        nonce = raw_packet[:12] #First 12 bytes are the nonce
+        # loads the 256 byte shared secret generated in diffi-hellman into the AES engine
+
+        nonce = raw_packet[:12]
+        # the Nonce (Number used ONCE) is basically kinda like a 12-byte unique string added to the math to ensure that every ecnryption is unique.
+        # here we strip out the first 12 characters by slicing as the Nonce is always stored at the start.
+
         ciphertext = raw_packet[12:] #The rest is the encrypted data
+
         decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None) #Decrypting the data
-        return decrypted_bytes.decode('utf-8') #Converting bytes back to a string
+        # the nonce key and the rest of the ciphertext is given to the decrypt function. It checks if the data
+        # was tampered with and if so the SHA fingerprint won't match and put out a exception.
+
+        return decrypted_bytes.decode('utf-8') # Converts the raw bytes to standard text string so can be pasted into the windows clipboard
     except Exception as e:
         print(f"Decryption Failed :( The packet may be corrupted: {e}")
         return None
