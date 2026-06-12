@@ -193,15 +193,36 @@ def derive_shared_key(private_key, target_public_key_b64):
     """
     # Decode the Base64 string from Android back into raw bytes
     target_bytes = base64.b64decode(target_public_key_b64)
+    # This above reverses the the decoded raw string so it can be turned back into raw unreadable binary bytes since android did the same and
+    # had basically converted it into a alphanumeric string making it possible to send over dweet
+
     peer_public_key = serialization.load_der_public_key(target_bytes)
+    # This takes the decoded output which are the raw binary bytes and mathematically rebuilds the Android phone's public coordinate point on the secp384r1 curve
+    # this would allow the python script to have the exact public location of the phone.
 
     # Performing Diffie-Hellman Key Exchange
     shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
+    # this calles the elliptic curve diffi-hellman algorithm by ec.ECDH() and then private_key.exchange(...) basically takes the laptop's private key and multiplies it with the
+    # android's public key which would have the coordinate point we would have gotten from Dweet.
+    
+    # Note: Since the math of the elliptic curve is accomodating, the order of operations doesn't really matter because the laptop
+    # would calculate Laptop_Private x Android_Public whereas the Android would calculate Android_Private x Laptop_Public hence this is basically cross-functional and both calculations would result
+    # in the same final number. This final number will be the shared_secret
+
+    # However, there is a slight issue that the current shared_secret is not friendly for AES as AES demands a 256-bit string and Curve points can have predictable leading zeros or
+    # could also have mathematical biases hence making it easy to guess and obviously impacting privacy eventually.
 
     # Match Android's native JCA SHA-256 derivation exactly
     digest = hashes.Hash(hashes.SHA256())
+    # This above initializes a cryptographic hashing function.
+
     digest.update(shared_secret)
+    # We give the hashing function the shared_secret we currently have
+
     aes_key = digest.finalize()
+    # The hashing function then processes the curve data and outputs a pefect random 256-bit key.
+
+    # Since NOW FINALLY both the laptop and the android put the exact same shared_secret into the exact same SHA-256 hashing function they both give out the EXACT SAME 256-bit AES key.
 
     return aes_key
 
@@ -221,35 +242,58 @@ def decrypt_incoming_payload(aes_key, raw_packet):
 
 def start_p2p_listener(aes_key):
     """
-    Opens a secure, local network socket port to listen for incoming data from iPad
+    Opens a secure, local network socket port to listen for incoming data from Android
     """
     
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # Again we are creating a socket using IPv4, however, this time we are using SOCK_STREAM which basically tells the OS to use TCP instead of UDP. This create
+    # a two-way connection between both the devices. 
+
     # Re-using the port if script restarts quickly
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # The SO_REUSEADDR basically tells the OS that if the port was recently used then it forcefully takes it over and re-uses it immidiately without waiting.
+
     server.bind(('0.0.0.0', PORT))
     server.listen(1)
+    # The first line is a special wildcard that basically tells the laptop to listen for traffic on each and every network card we have be 
+    # it Wi-Fi or Ethernet etc. on the port 53317 as that's defined as a constant.
+
+    # server.listen(1) basically turns the socket into a listening server where it allows a queue of 1 device to wait in line if the server is
+    # busy processing another connection.
+
     print(f"Direct secure tunnel listening on port {PORT}...")
 
     while True:
         conn, addr = server.accept()
+        # This is a block function i.e. it freezes the script and goes to sleep basically the second the android node connects on port 53317 then the script wakes up again
+        # 'conn' contains a new dedicated socket object to talk to the android connection
+        # 'addr' contains the android's ip address so it knows who is on the other end (android node).
         try:
             # Sockets recieve raw bytes, reading upto 4096 bytes
             encrypted_data = conn.recv(4096)
+            # It reads the incoming data stream from the android phone, there is a temporary limit set of 4096 bytes at a time (roughly 600-800 words).
+
             if encrypted_data:
                 print(f"Recieved encrypted payload from {addr[0]}")
 
                 plaintext = decrypt_incoming_payload(aes_key, encrypted_data)
+                # If the data actually arrives we give to decrypt_incoming_payload with the aes key we have
 
                 if plaintext:
                     print(f"Decrypted Payload: '{plaintext}'")
                     save_to_db(plaintext, "android")
+                    # If decryption is successful, then we log in SQLite by the save_to_db(,) function and also adds a android tag to mark where it came from
+
                     pyperclip.copy(plaintext)
+                    # This then copies the decrypted plain text we have onto the windows system clipboard
+
                     print("Successfully updated local clipboard with the new data!")
         except Exception as e:
             print(f"Tunnel Error: {e}")
         finally:
             conn.close()
+            # Since TCP connectios take up system memory it's important to clos the connection once the data is recieved and copied to the clipboard. Furthermore
+            # the flow will then cycle back to the top and wait at server.accept() to wait for the next time we copy something on our phone.
 
 def send_secure_payload(target_ip, aes_key, plaintext_data):
     """
@@ -280,19 +324,26 @@ def monitor_clipboard_and_send(target_ip, aes_key):
     Continuously monitors the clipboard for changes and sends new data to the target.
     """
     last_clipboard_content = pyperclip.paste()
-
+    # The script saves the content currently on the windows clipboard in the variable
+    # this is done since else the script would be assuming whatever was last on the clipboard is new content and send it to the phone as soon as the script starts fresh even. 
     while True:
         try:
             current_content = pyperclip.paste()
+            # every time the loop goes it grabs a fresh copy of the windows clipboard
 
             # If clipboard has text, and it's diffrent than the last thing we checked
             if current_content and current_content != last_clipboard_content:
+                # it checks if the clipboard isn't empty and also that the last clipboard content isn't the same as the current one
+
                 print(f"\n New Clipboard text detected: '{current_content[:20]}'")
                 save_to_db(current_content, "laptop")
+                # saves the clipboard content into the data and tags it with 'laptop' to indicate it was copied off the laptop's clipboard
 
                 send_secure_payload(target_ip, aes_key, current_content)
+                # triggers the outgoing network function to encrypt the clipboard's current content and send it to the android phone
 
                 last_clipboard_content = current_content
+                # overwriting the previously saved content with current one so the loop goes on ;)
         except Exception as e:
             pass # Completely ignoring clipboard lock errors thrown by Windows sometimes #TODO:
 
@@ -326,6 +377,10 @@ def main():
         args=(aes_key,), 
         daemon=True
         )
+
+    # This basically build a new thread that is assigns a seperate task to the processor to tell 
+    # it to give the new task it's own memory space and processor time. It tells the new thread to run the start_p2p_listener function and then
+    # the args argument basically contains the argument that are to be passed tothe function itself and deaomon = True basically closes this thread as soon as the main script closes.
     listener_thread.start()
     
     monitor_clipboard_and_send(target_ip, aes_key)
