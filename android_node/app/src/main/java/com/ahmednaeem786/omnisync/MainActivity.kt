@@ -1,5 +1,6 @@
 package com.ahmednaeem786.omnisync
 
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,6 +21,12 @@ import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 
+/*
+This is the main window for the android app.
+When the app is first run, it pops up to ask the user to allow system notifications.
+After getting the permission, it starts the background service using the startForegroundService()
+function.
+ */
 class MainActivity : ComponentActivity() {
 
     private val requestPermissionLauncher = registerForActivityResult(

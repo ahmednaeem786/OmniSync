@@ -23,7 +23,20 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.NetworkInterface
 import java.net.URL
+import java.net.URLEncoder
 
+/*
+This is the main core of the Android app. It is a foreground service which is basically a special
+class in android for apps that need to run continuously. The startForeground() ties the service
+to a persistent notification in the status bar hence indicating the android kernel to not restrict cpu
+or network access for the service.
+It first connects to dweet.cc and sends its IP and key and then waits for the data to be send from
+the laptop. Secondly, once the AES key is recieved, it opens port 53317 and then waits for the laptop
+to send it's clipboard data.
+Once the clipboard data arrives from the laptop it uses Handler(Looper.getMainLooper()).post to
+go from the background network thread to the main thread just long enough to
+pust the text into the system's clipboard.
+ */
 class OmniSyncService: Service() {
 
     private val TAG = "OmniSyncService"
@@ -169,17 +182,15 @@ class OmniSyncService: Service() {
 
                 val postUrl = URL("https://dweet.cc/dweet/for/$channel-android")
                 val postConn = postUrl.openConnection() as HttpURLConnection
-                postConn.requestMethod = "POST"
-                postConn.setRequestProperty("Content-Type", "application/json")
-                postConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                postConn.doOutput = true
+                // 2. Broadcast Android Presence via GET URL Parameters
+                val encodedKey = URLEncoder.encode(myPublicKeyStr, "UTF-8")
+                val broadcastUrl = URL("https://dweet.cc/dweet/for/$channel-android?ip=$myIp&public_key=$encodedKey")
 
-                val payload = JSONObject().apply {
-                    put("ip", myIp)
-                    put("public_key", myPublicKeyStr)
-                }
-                postConn.outputStream.write(payload.toString().toByteArray())
-                Log.d(TAG, "Broadcast sent. Server Response: ${postConn.responseCode}")
+                val broadcastConn = broadcastUrl.openConnection() as HttpURLConnection
+                broadcastConn.requestMethod = "GET"
+                broadcastConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+                Log.d(TAG, "Broadcast sent. Server Response: ${broadcastConn.responseCode}")
 
                 val getUrl = URL("https://dweet.cc/get/latest/dweet/for/$channel-laptop")
                 var laptopPubKey: String? = null

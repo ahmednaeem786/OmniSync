@@ -13,6 +13,16 @@ import javax.crypto.KeyAgreement
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+/*
+This acts like the translator for both the devices i.e. the Windows-side python script
+and the android-side service. It mainly uses the JCA (Java Cryptography Architecture) and generates
+the same SECP384R1 elliptic curve keys and also compresses the public key into the same Base64 string
+that the python script uses too.
+Furthermore, it takes the laptop's public key, runs the Diffie-Hellman math and then mimics the SHA-256
+hashing process to determine the exact 256 bytes AES key.
+When the encrypted bytes arrive over the network, it uses the AES-GCM to seperate the Nonce, check
+the authentication tag and then decrypts the ciphertext back into plain english text.
+ */
 class CryptoHelper {
 
     companion object {
