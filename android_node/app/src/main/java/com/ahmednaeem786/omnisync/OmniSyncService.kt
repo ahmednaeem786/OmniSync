@@ -38,22 +38,70 @@ go from the background network thread to the main thread just long enough to
 pust the text into the system's clipboard.
  */
 class OmniSyncService: Service() {
+    /*
+    This class inherits from Service() which is a application component that is able to perform
+    long-running operations in the background without a UI.
+     */
 
     private val TAG = "OmniSyncService"
+    /*
+    Setting A TAG for the logcat messages helps filter in the system logs by simply searching for
+    'OmniSyncService'
+     */
     private val PORT = 53317
+    /*
+    Matches the port being used by the python script.
+     */
     private val CHANNEL_ID = "OmniSyncChannel"
+    /*
+    Android requires notifications to be asigned to specific channels. CHANNEL_ID is the internal
+    ID for that channel.
+     */
     private var serverSocket: ServerSocket? = null
+    /*
+    Eventually holds the Android TCP socket. The '?' means it's nullable and will be null as well
+    when it's not initialized (i.e. we haven't opened the socket yet).
+     */
     private var isRunning = false
+    /*
+    Boolean switch for the background network loop to know when to shut down.
+     */
 
     private lateinit var aesKey: ByteArray
+    /*
+    'lateinit' is a special kotlin keyword meaning Late initialization which tells the android compiler
+    that it doesn't have the data for this right now, but will be putting data into it before trying
+    to use it and that it shouldn't crash. This is specifically done since kotlin doesn't allow to
+    declare a variable without immediately putting data into it (a.k.a Null Safety).
+    Done since we need a variable for the 256 bit AES key and can't create the key until Dweet.cc
+    handshake finishes (takes a bit of time)
+     */
 
     override fun onCreate() {
+        /*
+        createNotificationChannel() registers the notification channel with the OS after allocating
+        memory for the app through super.onCreate(). This is done so that when LATER the service starts
+        it can post its persistent notification to stay alive.
+         */
         super.onCreate()
         Log.d(TAG, "Service Created")
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        /*
+        createNotification calls the helper function which build the visual notification card sitting
+        in the Android dropdown menu.
+        startForeground(1, notification) hands the notification to the OS so it can lock the app
+        into foreground state. The '1' in this is a unique ID number for the notification card.
+        We check if the service is running since onStartCommand would be called every time the app
+        icon is tapped so we don't want to create multiple background threads that are trying to talk
+        to Dweet.cc on the same port at the same time which would eventually cause the app to crash.
+        performHandshake() starts the procedure of exchanging public keys and starting the TCP
+        channel.
+        START_STICKY is a system flag which if returned by onStartCommand() tells the OS to restart
+        the service if it's killed by the OS.
+         */
         Log.d(TAG, "Service Started")
 
         // Post the persistent notification
@@ -71,6 +119,22 @@ class OmniSyncService: Service() {
     }
 
     private fun startTcpListener() {
+        /*
+        Creates a new background thread to listen for incoming TCP connections.
+        ServerSocket(PORT) requests the Android OS to reserve port number 53317 and routing any
+        incoming network traffic on that port directly to this application.
+        It runs a infinite polling (while) loop which runs endlessly as long as the service is alive
+        and this only ends when the service is closed off.
+        .accept() is a blocking function which means the background thread would freeze and then
+        sleep until a connection is made and the point at which the python script sends secure payload
+        and connects to the phone's IP address this thread would wake up again and creates a dedicated
+        clientSocket to catch the incoming bytes.
+        The double exclamation mark '!!' indicates that the socket isn't null and forces it to compile.
+        After a successful connection, the socket is then passed to a further function so it can then
+        decrypt the data so that this current listening thread can loop back to the .accept() function
+        and go to sleep (else if we would've done the decryption right here then server would've been
+        still busy and might miss new clipboard text coming in).
+         */
         thread(start = true, isDaemon = true, name = "OmniSyncSocketThread") {
             try {
                 serverSocket = ServerSocket(PORT)
@@ -89,6 +153,18 @@ class OmniSyncService: Service() {
     }
 
     private fun handleIncomingConnection(socket: Socket) {
+        /*
+        This function recieves the live socket from startTcpListener() function. It creates a new
+        thread so we can accomodate another clipboard message while keeping the server free.
+        socket.getInputStream() starts the connection coming from the Window laptop. Sockets read a
+        portion of data each time and in this case it read around 4 KiloBytes/4096 Bytes at once.
+        rawPacket contains the exactly sized encrypted package as the portion can hold 4096 bytes but
+        if the payload (recieved data) is only 45 bytes then the remaining 4051 bytes would be just
+        empty zeroes and if the AES decrypter is fed empty zeroes, then it would crash.
+        This rawPacket is then handed over to the CryptoHelper's function i.e. decryptPayload which
+        seperates the Nonce, check the authentication tag and then decrypts the ciphertext back into
+        plain text.
+         */
         thread(start = true) {
             try {
                 val inputStream = DataInputStream(socket.getInputStream())
@@ -116,6 +192,17 @@ class OmniSyncService: Service() {
     }
 
     private fun updateSystemClipboard(text: String) {
+        /*
+        Handler(Looper.getMainLooper()).post hands the code block to the main thread so it can
+        update the system clipboard.
+        The app doesn't have the clipboard in itself, hence it asks the Android OS kernel to give
+        access to the system clipboard by it's API and since getSystemService can return different
+        tools like Location Manager, Bluetooth Manager etc we cast it as ClipboardManager so
+        Kotlin knows what things we are allowed access to.
+        The clipboard can hold text/links, images, etc. so we wrap our data in a newPLainText(,) func
+        to get a ClipData object.
+        The old clipboard data is then deleted and the new clipboard data is then set.
+         */
 
         Handler(Looper.getMainLooper()).post {
             try {
@@ -140,6 +227,13 @@ class OmniSyncService: Service() {
     }
 
     private fun createNotificationChannel() {
+        /*
+        This function runs if the service is running on a phone with > android 8.0 as it assigns
+        priority to the separate notifications deciding on what action they will carry out for e.g.
+        making a sound and putting out a banner or just a banner notif etc.
+        Requests access to the OS's NotificationManager and then creates a notification channel and
+        gives it over to the OS so it can display it properly.
+         */
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
@@ -152,6 +246,18 @@ class OmniSyncService: Service() {
     }
 
     private fun getLocalIpAddress(): String {
+        /*
+        interfaces variable stores the list of physical and virtual network cards active on the
+        android phone (also include localhost and 4G/5G cellular modems).
+        Runs a while loop to go through each network card one by one and also runs another while
+        loop to go through each of their IP addresses.
+        At the core it's searching for a address that is not a loopback (like a local host) and
+        is a valid IPv4 address and returns after finding such a IP address.
+        '?' operator in the return statement means that if the found address is null then it
+        simply returns '127.0.0.1' simply as a fallback (to avoid crashing since plugging in a null
+        value into a socket would rather crash everything).
+
+         */
         try {
             val interfaces = NetworkInterface.getNetworkInterfaces()
             while (interfaces.hasMoreElements()) {
@@ -170,19 +276,33 @@ class OmniSyncService: Service() {
     }
 
     private fun performHandshake() {
+        /*
+        This function first asks the internal functions from CryptoHelper to generate a key pair and
+        from the elliptic curve and then also formats it as a Base64 String. It then also stores our
+        local IP address.
+        URLEncoder.encode(,) then translates the public key into a UTF-8 format so it's safe to send
+        over the web and later on is appended with the IP into the URL.
+        broadcastConn contains the procedure to send the URL onto the dweet server with a GET request
+        method and also spoofs by setting the user-agent to Mozilla/5.0....
+        After broadcast is sent over Dweet server the phone then switches into a listening mode
+        where it monitors the '-laptop' channel and then enters a while loop until the laptopPubKey
+        is found.
+        If the Dweet server returns a 200 OK status then the program reads the text and parses the
+        text received in JSON to extract the IP address and public key, however, if the Dweet server
+        hasn't returned the text yet, the thread goes to sleep for 3 seconds to avoid getting a IP ban.
+        Then the laptop's public key and the phone's private key is fed into the Diffie-Hellman
+        procedure to determine the exactly same 256-bit AES key as the python script.
+        After determining the AES key, it triggers startTcpListener() to start syncing clipboards.
+         */
         thread(start = true, name = "HandshakeThread") {
             try {
                 Log.i(TAG, "Starting Dweet Handshake...")
-
                 val channel = "omnisync-default-fallback-channel"
 
                 val keyPair = CryptoHelper.generateKeyPair()
                 val myPublicKeyStr = CryptoHelper.getPublicKeyString(keyPair)
                 val myIp = getLocalIpAddress()
 
-                val postUrl = URL("https://dweet.cc/dweet/for/$channel-android")
-                val postConn = postUrl.openConnection() as HttpURLConnection
-                // 2. Broadcast Android Presence via GET URL Parameters
                 val encodedKey = URLEncoder.encode(myPublicKeyStr, "UTF-8")
                 val broadcastUrl = URL("https://dweet.cc/dweet/for/$channel-android?ip=$myIp&public_key=$encodedKey")
 
@@ -226,6 +346,13 @@ class OmniSyncService: Service() {
     }
 
     override fun onDestroy() {
+        /*
+        Calls the parent class's onDestroy() function to cleanup the memory for the service while
+        killing it.
+        Also finally sets the flag to false to indicate that the service is no longer running and
+        close down every background thread.
+        Also closes the socket if it still exists else just ignores this line due to the '?' operator.
+         */
         super.onDestroy()
         isRunning = false
         serverSocket?.close()
