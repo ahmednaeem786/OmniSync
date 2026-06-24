@@ -144,7 +144,8 @@ def broadcast_presence(local_ip, public_key):
     try:
         payload = {
             "ip": local_ip,
-            "public_key": public_key
+            "public_key": public_key,
+            "timestamp": int(time.time())
         }
 
         # response = requests.post(url, json=payload, timeout=3) # TODO: DEBUGGGING
@@ -187,6 +188,17 @@ def listen_for_target():
                     content = data["with"][0]["content"]
                     # If the android successfully broadcast, then the server sends the data as a giant block of text, the code i.e. 'response.json()' converts that text into a python dictionary
                     # further on we use slicing to look for the 'with' keyword and then in that we look for the 'content' keyword since dweet wraps data in layers.
+
+                    if "ip" in content and "public_key" in content and "timestamp" in content:
+                        target_timestamp = content.get["timestamp"]
+                        current_time = int(time.time())
+
+                        age_in_seconds = current_time - target_timestamp
+
+                        if age_in_seconds > 60:
+                            print(f"Found a old Android key i.e. {age_in_seconds}s old. Waiting for a fresh key...")
+                            time.sleep(3)
+                            continue
 
                     """[DEBUGGING CODE]"""
 
