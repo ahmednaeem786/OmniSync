@@ -13,6 +13,8 @@ import javax.crypto.KeyAgreement
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+import android.util.Log
+
 /*
 This acts like the translator for both the devices i.e. the Windows-side python script
 and the android-side service. It mainly uses the JCA (Java Cryptography Architecture) and generates
@@ -90,6 +92,9 @@ class CryptoHelper {
             keyAgreement.init(privateKey)
             keyAgreement.doPhase(targetPubKey, true)
             val sharedSecret = keyAgreement.generateSecret()
+
+            val rawHex = sharedSecret.joinToString("") { "%02x".format(it) }
+            Log.e("Crypto", "[DEBUG] Android's Raw Shared Secret: $rawHex")
 
             val digest = MessageDigest.getInstance("SHA-256")
             return digest.digest(sharedSecret)

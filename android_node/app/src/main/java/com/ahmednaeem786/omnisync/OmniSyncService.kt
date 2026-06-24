@@ -40,7 +40,7 @@ pust the text into the system's clipboard.
 class OmniSyncService: Service() {
     /*
     This class inherits from Service() which is a application component that is able to perform
-    long-running operations in the background without a UI.
+    long-running operations in the backg    round without a UI.
      */
 
     private val TAG = "OmniSyncService"
@@ -172,6 +172,10 @@ class OmniSyncService: Service() {
                 val bytesRead = inputStream.read(buffer)
 
                 if (bytesRead > 0) {
+
+                    // DEBUG
+                    Log.e(TAG, "[DEBUG] Received $bytesRead bytes of data over TCP.")
+
                     val rawPacket = buffer.copyOfRange(0, bytesRead)
 
                     val plaintext = CryptoHelper.decryptPayload(aesKey, rawPacket)
@@ -302,15 +306,49 @@ class OmniSyncService: Service() {
                 val keyPair = CryptoHelper.generateKeyPair()
                 val myPublicKeyStr = CryptoHelper.getPublicKeyString(keyPair)
                 val myIp = getLocalIpAddress()
-
                 val encodedKey = URLEncoder.encode(myPublicKeyStr, "UTF-8")
-                val broadcastUrl = URL("https://dweet.cc/dweet/for/$channel-android?ip=$myIp&public_key=$encodedKey")
 
+                val broadcastUrl = URL("https://dweet.cc/dweet/for/$channel-android")
                 val broadcastConn = broadcastUrl.openConnection() as HttpURLConnection
-                broadcastConn.requestMethod = "GET"
-                broadcastConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                broadcastConn.requestMethod = "POST"
 
-                Log.d(TAG, "Broadcast sent. Server Response: ${broadcastConn.responseCode}")
+                broadcastConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                broadcastConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                broadcastConn.doOutput = true
+
+                val encodedIp = URLEncoder.encode(myIp, "UTF-8")
+                val formPayload = "ip=$encodedIp&public_key=$encodedKey"
+
+                broadcastConn.outputStream.use { os ->
+                    val input = formPayload.toByteArray(Charsets.UTF_8)
+                    os.write(input, 0, input.size)
+                }
+
+                val responseCode = broadcastConn.responseCode
+                val responseText = if (responseCode == 200) {
+                    broadcastConn.inputStream.bufferedReader().readText()
+                } else {
+                    broadcastConn.errorStream?.bufferedReader()?.readText() ?: "Unknown Server Error"
+                }
+
+                Log.d(TAG, "Broadcast sent. Server Response Code: $responseCode")
+
+                Log.d(TAG, "[DEBUG] Dweet Server's Response Text: $responseText")
+//                // Package the raw Base64 string directly into a JSON wrapper
+//                val jsonPayload = """
+//                {
+//                    "ip": "$myIp",
+//                    "public_key": "$myPublicKeyStr"
+//                }
+//            """.trimIndent()
+//
+//                // Sending the JSON package to the dweet server
+//                broadcastConn.outputStream.use { os ->
+//                    val input = jsonPayload.toByteArray(Charsets.UTF_8)
+//                    os.write(input, 0, input.size)
+//                }
+//
+//                Log.d(TAG, "Broadcast sent. Server Response: ${broadcastConn.responseCode}")
 
                 val getUrl = URL("https://dweet.cc/get/latest/dweet/for/$channel-laptop")
                 var laptopPubKey: String? = null
@@ -321,6 +359,9 @@ class OmniSyncService: Service() {
 
                     if (getConn.responseCode == 200) {
                         val response = getConn.inputStream.bufferedReader().readText()
+
+                        Log.e(TAG, "[DEBUG] Raw Dweet Content Received: $response")
+
                         val json = JSONObject(response)
 
                         if (json.has("with")) {
@@ -328,14 +369,24 @@ class OmniSyncService: Service() {
                             val laptopIp = content.getString("ip")
                             laptopPubKey = content.getString("public_key")
                             Log.i(TAG, "Found Laptop at IP: $laptopIp")
+
+                            Log.i(TAG, "[DEBUG] Laptop's Public Key: $laptopPubKey")
+
                         }
                     }
                     if (laptopPubKey == null) Thread.sleep(3000)
                 }
 
                 if (laptopPubKey != null) {
+                    Log.e(TAG, "[DEBUG] My Android Public Key: ${myPublicKeyStr.take(20)}")
+                    Log.e(TAG, "[DEBUG] Laptop's Public Key: ${laptopPubKey.take(20)}")
+
                     aesKey = CryptoHelper.deriveSharedKey(keyPair.private, laptopPubKey)
                     Log.i(TAG, "Success!! Phase 1 Complete. E2EE Key Locked.")
+
+                    // DEBUG
+                    val hexKey = aesKey.joinToString("") { "%02x".format(it) }
+                    Log.e(TAG, "[DEBUG] Current AES Key: $hexKey")
 
                     startTcpListener()
                 }
