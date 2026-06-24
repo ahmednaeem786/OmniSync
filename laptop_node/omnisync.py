@@ -133,27 +133,36 @@ def generate_keypair():
 
 def broadcast_presence(local_ip, public_key):
     """
-    Sends the IP and Public Key via URL Parameters instead of a JSON body.
+    Sends the IP and Public Key via a JSON body.
     """
-    # Safely URL-encodes the Base64 characters (+, /, =) so Dweet doesn't choke
-    encoded_params = urllib.parse.urlencode({"ip": local_ip, "public_key": public_key})
-    # Before this, we just compressed out cryptographic key into a Base64 string, however, web browsers and server
-    # which in our case would be Dweet.cc uses those exact same characters as structural rules for URLS. For e.g. ? means 'start of data',
-    # & means 'next item' and so on. If we just gave it the stock Base64 key we have into the URL it's gonna misinterpret the public key and breaking it.
-    # so to solve that issue we use the built-in python translator and converts the characters into hexadecimal web codes hence outputting a safe string for the URL.
+    url = f"{SIGNALING_SERVER}/dweet/for/{SYNC_CHANNEL}-{MY_ROLE}"
 
-    url = f"{SIGNALING_SERVER}/dweet/for/{SYNC_CHANNEL}-{MY_ROLE}?{encoded_params}"
-    
-    print(f"Broadcasting presence to Dweet.cc...")
+    print(f"[DEBUG] Dweet URL: {url}")
+
+    print(f"Broadcasting presence to Dweet.cc through JSON POST")
 
     try:
-        requests.get(url, timeout=10)
-        # Fires the network call over the url we have finally generated. Executes a GET request usually POST is used but
-        # dweet server's were causing a fuss hence utilized GET and then the server accepts our data.
-        # there is a timeout of 10 seconds i.e. if server doesn't respond in 10 secodns then it gives up and moves on
+        payload = {
+            "ip": local_ip,
+            "public_key": public_key
+        }
+
+        # response = requests.post(url, json=payload, timeout=3) # TODO: DEBUGGGING
+
+        response = requests.post(url, data=payload, timeout=3)
+
+
+        print(f"[DEBUG] Response URL: {response.request.url}")
+        print(f"[DEBUG] Response Body: {response.request.body}")
+        print(f"[DEBUG] Response Headers: {response.request.headers}")
+
+
+        print(f"[DEBUG] Dweet Status Code: {response.status_code}")
+        print(f"[DEBUG] Dweet Server Replied {response.text}")
+
+        print("[DEBUG] INITIAL JSON Payload Successfully sent over Dweet for android device to read.")
     except Exception as e:
-        print(f"Broadcast failed: {e}")
-        # in the case if the 10-second timeout is met, then it throws a error and here the error is simply output.
+        print(f"Broadcast Failed: {e}")
 
 def listen_for_target():
     """
@@ -179,7 +188,17 @@ def listen_for_target():
                     # If the android successfully broadcast, then the server sends the data as a giant block of text, the code i.e. 'response.json()' converts that text into a python dictionary
                     # further on we use slicing to look for the 'with' keyword and then in that we look for the 'content' keyword since dweet wraps data in layers.
 
-                    print(f"Found the [TARGET_ROLE] with IP: {content['ip']}")
+                    """[DEBUGGING CODE]"""
+
+                    target_ip = content.get("ip")
+                    target_pub_key = content.get("public_key")
+
+                    if target_ip and target_pub_key:
+                        print(f"\n[DEBUG] Recorded Android IP: {target_ip}")
+                        print(f"\n[DEBUG] Recorded Android Public Key: {target_pub_key}")
+
+
+                    print(f"Found the {TARGET_ROLE} with IP: {content['ip']}")
                     return content["ip"], content["public_key"]
                 # The moment the script finds the data, the return statement kills the infinite while True loop and passes the android's IP
                 # and public key that is given in the data to the main script so it can start deriving shared key
@@ -204,6 +223,8 @@ def derive_shared_key(private_key, target_public_key_b64):
     shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
     # this calles the elliptic curve diffi-hellman algorithm by ec.ECDH() and then private_key.exchange(...) basically takes the laptop's private key and multiplies it with the
     # android's public key which would have the coordinate point we would have gotten from Dweet.
+
+    print(f"[DEBUG] Python-side Raw Shared Secret: {shared_secret.hex()}")
     
     # Note: Since the math of the elliptic curve is accomodating, the order of operations doesn't really matter because the laptop
     # would calculate Laptop_Private x Android_Public whereas the Android would calculate Android_Private x Laptop_Public hence this is basically cross-functional and both calculations would result
@@ -223,6 +244,8 @@ def derive_shared_key(private_key, target_public_key_b64):
     # The hashing function then processes the curve data and outputs a pefect random 256-bit key.
 
     # Since NOW FINALLY both the laptop and the android put the exact same shared_secret into the exact same SHA-256 hashing function they both give out the EXACT SAME 256-bit AES key.
+
+    print(f"[DEBUG] Current AES Key: {aes_key.hex()}")
 
     return aes_key
 
@@ -314,12 +337,16 @@ def send_secure_payload(target_ip, aes_key, plaintext_data):
         encrypted_payload = aesgcm.encrypt(nonce, plaintext_data.encode('utf-8'), None) # Encrypting the plaintext string
         final_packet = nonce + encrypted_payload # Packaging the nonce and the encrypted data together (reciever needs nonce to decrpyt it)
         
+        # print(f"[DEBUG] Opening TCP Socket to {target_ip}:{PORT}")
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #Opening an outbound TCP socket connection
         client_socket.settimeout(5) #Not hanging forever if the target drops.
 
         print(f"Connecting directly to target node at {target_ip}:{PORT}...")
         client_socket.connect((target_ip, PORT)) #Connecting to the target's IP and the agreed upon port number
 
+        print("[DEBUG] Socket Connected! Pushing Bytes")
+
+        print(f"[DEBUG] Sending {len(final_packet)} bytes over TCP.")
         client_socket.sendall(final_packet) # Streaming raw bytes
         print("Encrypted payload successfully transmitted!")
 
@@ -347,9 +374,11 @@ def monitor_clipboard_and_send(target_ip, aes_key):
                 print(f"\n New Clipboard text detected: '{current_content[:20]}'")
                 save_to_db(current_content, "laptop")
                 # saves the clipboard content into the data and tags it with 'laptop' to indicate it was copied off the laptop's clipboard
-
+                
+                # print("[DEBUG] Attempting to send payload to Android...")
                 send_secure_payload(target_ip, aes_key, current_content)
                 # triggers the outgoing network function to encrypt the clipboard's current content and send it to the android phone
+                # print("[DEBUG] Payload Sent Completed!")
 
                 last_clipboard_content = current_content
                 # overwriting the previously saved content with current one so the loop goes on ;)
@@ -365,7 +394,7 @@ def main():
     print("Initializing SQLite History Database...")
     init_db()
 
-    print(f"Using Channel ID: {SYNC_CHANNEL[:8]}...")
+    print(f"Using Channel ID: {SYNC_CHANNEL}...")
 
     local_ip = get_local_ip()
     print(f"My Local IP: {local_ip}")
@@ -378,6 +407,10 @@ def main():
     print("\nSUCCESSS! Phase 1: Handshake Complete!")
     
     print("Computing shared E2EE encryption key...")
+
+    print(f"\n[DEBUG] Current Python Public Key: {public_key}")
+    print(f"\n[DEBUG] Current ANDROID Public Key: {target_public_key}")
+
     aes_key = derive_shared_key(private_key, target_public_key)
     print("Cryptographic key successfully locked in memory.")
 

@@ -1,8 +1,4 @@
-os
-time
-socket
 requests
-threading
 pyperclip
 dotenv
 cryptography
