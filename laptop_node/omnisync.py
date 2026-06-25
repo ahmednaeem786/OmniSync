@@ -182,6 +182,11 @@ def listen_for_target():
             # Pings the url we have and then check that if the response given is OK i.e. a 200 status code
             #  this means the android phone has broadcasted then and if not then it might return a 404 Not Found error
 
+            print(f"[DEBUG] Response URL: {response.request.url}")
+            print(f"[DEBUG] Response Text: {response.text}")
+
+
+
             if response.status_code == 200:
                 data = response.json()
                 if "with" in data and len(data["with"]) > 0:
@@ -190,7 +195,7 @@ def listen_for_target():
                     # further on we use slicing to look for the 'with' keyword and then in that we look for the 'content' keyword since dweet wraps data in layers.
 
                     if "ip" in content and "public_key" in content and "timestamp" in content:
-                        target_timestamp = content.get["timestamp"]
+                        target_timestamp = int(content.get("timestamp"))
                         current_time = int(time.time())
 
                         age_in_seconds = current_time - target_timestamp
@@ -214,7 +219,8 @@ def listen_for_target():
                     return content["ip"], content["public_key"]
                 # The moment the script finds the data, the return statement kills the infinite while True loop and passes the android's IP
                 # and public key that is given in the data to the main script so it can start deriving shared key
-        except Exception:
+        except Exception as e:
+            print(f"[ERROR] Loop crashed because: {e}")
             pass
         time.sleep(3)
 
