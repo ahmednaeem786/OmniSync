@@ -307,6 +307,7 @@ class OmniSyncService: Service() {
                 val myPublicKeyStr = CryptoHelper.getPublicKeyString(keyPair)
                 val myIp = getLocalIpAddress()
                 val encodedKey = URLEncoder.encode(myPublicKeyStr, "UTF-8")
+                val currentUnixTime = System.currentTimeMillis() / 1000
 
                 val broadcastUrl = URL("https://dweet.cc/dweet/for/$channel-android")
                 val broadcastConn = broadcastUrl.openConnection() as HttpURLConnection
@@ -317,7 +318,7 @@ class OmniSyncService: Service() {
                 broadcastConn.doOutput = true
 
                 val encodedIp = URLEncoder.encode(myIp, "UTF-8")
-                val formPayload = "ip=$encodedIp&public_key=$encodedKey"
+                val formPayload = "ip=$encodedIp&public_key=$encodedKey&timestamp=$currentUnixTime"
 
                 broadcastConn.outputStream.use { os ->
                     val input = formPayload.toByteArray(Charsets.UTF_8)
@@ -334,21 +335,6 @@ class OmniSyncService: Service() {
                 Log.d(TAG, "Broadcast sent. Server Response Code: $responseCode")
 
                 Log.d(TAG, "[DEBUG] Dweet Server's Response Text: $responseText")
-//                // Package the raw Base64 string directly into a JSON wrapper
-//                val jsonPayload = """
-//                {
-//                    "ip": "$myIp",
-//                    "public_key": "$myPublicKeyStr"
-//                }
-//            """.trimIndent()
-//
-//                // Sending the JSON package to the dweet server
-//                broadcastConn.outputStream.use { os ->
-//                    val input = jsonPayload.toByteArray(Charsets.UTF_8)
-//                    os.write(input, 0, input.size)
-//                }
-//
-//                Log.d(TAG, "Broadcast sent. Server Response: ${broadcastConn.responseCode}")
 
                 val getUrl = URL("https://dweet.cc/get/latest/dweet/for/$channel-laptop")
                 var laptopPubKey: String? = null
@@ -366,9 +352,22 @@ class OmniSyncService: Service() {
 
                         if (json.has("with")) {
                             val content = json.getJSONArray("with").getJSONObject(0).getJSONObject("content")
-                            val laptopIp = content.getString("ip")
-                            laptopPubKey = content.getString("public_key")
-                            Log.i(TAG, "Found Laptop at IP: $laptopIp")
+
+                            val targetTimestamp = content.optLong("timestamp", 0L)
+                            val currentTime = System.currentTimeMillis() / 1000
+                            val ageInSeconds = currentTime - targetTimestamp
+
+                            if (ageInSeconds > 60)
+                            {
+                                Log.e(TAG, "Found a old Laptop Key i.e. ${ageInSeconds}s old. Waiting for a fresh one...")
+                            }
+                            else
+                            {
+                                val laptopIp = content.getString("ip")
+                                laptopPubKey = content.getString("public_key")
+                                Log.i(TAG, "Found Laptop at IP: $laptopIp")
+                            }
+
 
                             Log.i(TAG, "[DEBUG] Laptop's Public Key: $laptopPubKey")
 
