@@ -96,41 +96,6 @@ def get_local_ip():
         # If we DON'T close the socket we risk having a resource leak, plus it would also free up resources.
     return ip
 
-def generate_keypair():
-    """
-    Generates an ephemeral SECP384R1 Elliptic Curve keypair.
-    Handles the asymmetric cryptography engine i.e. creates a matching pair of cryptographic
-    keys one of which is a private key and other one is a public key. 
-    """
-
-    private_key = ec.generate_private_key(ec.SECP384R1())
-    # Calls the cryptography's library elliptic curve (ec) module to generate a new private key
-    # also defines the mathematical shape of the curve we are using i.e. SECP384R1 in out case and in it's title '384' means 384-bit key size 
-
-    public_key = private_key.public_key()
-    # Simply uses the elliptic curve multiplication with the private key we just generated and multiplies it by a starting point
-    # on the curve, which eventually calculate a coordinate point (x,y) on the curve.
-    # With this operation, anyone who has the public key coordinate can easily verify it belongs to our chosen curve, however, they
-    # can't reverse-engineer it i.e. figure out the private key with it. Hence we will be sending only the public key over dweet.cc
-
-    # Export as raw DER bytes (no newlines/headers) and compress to Base64
-    public_bytes = public_key.public_bytes(
-        encoding = serialization.Encoding.DER,
-        format = serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    # The public key object i.e. in this case is the EllipticCurvePublicKey is a live Python object and issue with that
-    # is that we can't send a Python memory object across the internet we need to convert it into a flat stream of data bytes.
-    # Hence in the code above we use DER (Distinguished Encoding Rules) which is a strict binary format hence deleting all the human-readable stuff
-    # that includes the headers, footers, newlines etc and only encodes key coordinates into pure, compact, raw binary bytes.
-    # Secondly, the format used is a standard cryptographic layout structure and ensures that whichever system reads these raw bytes like for e.g.
-    # in our case it's the Android phone running Kotlin it will know how to parse the mathematics to rebuild the key object.
-    # Note: the SubjectPublicKeyInfo (SPKI) basically tells python to package only two things i.e. actual math of public key, a tag that identifies the algorithm used in our case it's SECP384R1 EC
-    
-    return private_key, base64.b64encode(public_bytes).decode('utf-8')
-    # Finally, we just return a a tuple containing the private key and also the other part i.e. base64.b64encode(public_bytes).decode('utf-8')
-    # encodes raw binary bytes and translates them into clean alphanumeric characters since raw binary bytes have messy unprintable character looking
-    # like weird symbols and if we directly send them to dweet.cc then it would probably mix up the data or reject it
-    # finally, .decode('utf-8') converts these raw bytes into a text string so it can be placed in a JSON package.
 
 def broadcast_presence(local_ip, public_key):
     """
@@ -225,71 +190,47 @@ def listen_for_target():
             pass
         time.sleep(3)
 
-def derive_shared_key(private_key, target_public_key_b64):
-    """
-    Combines private key + target's public key to derive shared secret key.
-    """
-    # Decode the Base64 string from Android back into raw bytes
-    target_bytes = base64.b64decode(target_public_key_b64)
-    # This above reverses the the decoded raw string so it can be turned back into raw unreadable binary bytes since android did the same and
-    # had basically converted it into a alphanumeric string making it possible to send over dweet
+# def derive_shared_key(private_key, target_public_key_b64):
+#     """
+#     Combines private key + target's public key to derive shared secret key.
+#     """
+#     target_bytes = base64.b64decode(target_public_key_b64)
+#     peer_public_key = serialization.load_der_public_key(target_bytes)
+#     shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
 
-    peer_public_key = serialization.load_der_public_key(target_bytes)
-    # This takes the decoded output which are the raw binary bytes and mathematically rebuilds the Android phone's public coordinate point on the secp384r1 curve
-    # this would allow the python script to have the exact public location of the phone.
+#     print(f"[DEBUG] Python-side Raw Shared Secret: {shared_secret.hex()}")
 
-    # Performing Diffie-Hellman Key Exchange
-    shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
-    # this calles the elliptic curve diffi-hellman algorithm by ec.ECDH() and then private_key.exchange(...) basically takes the laptop's private key and multiplies it with the
-    # android's public key which would have the coordinate point we would have gotten from Dweet.
+#     digest = hashes.Hash(hashes.SHA256())
 
-    print(f"[DEBUG] Python-side Raw Shared Secret: {shared_secret.hex()}")
-    
-    # Note: Since the math of the elliptic curve is accomodating, the order of operations doesn't really matter because the laptop
-    # would calculate Laptop_Private x Android_Public whereas the Android would calculate Android_Private x Laptop_Public hence this is basically cross-functional and both calculations would result
-    # in the same final number. This final number will be the shared_secret
+#     digest.update(shared_secret)
+#     aes_key = digest.finalize()
 
-    # However, there is a slight issue that the current shared_secret is not friendly for AES as AES demands a 256-bit string and Curve points can have predictable leading zeros or
-    # could also have mathematical biases hence making it easy to guess and obviously impacting privacy eventually.
+#     print(f"[DEBUG] Current AES Key: {aes_key.hex()}")
 
-    # Match Android's native JCA SHA-256 derivation exactly
-    digest = hashes.Hash(hashes.SHA256())
-    # This above initializes a cryptographic hashing function.
+#     return aes_key
 
-    digest.update(shared_secret)
-    # We give the hashing function the shared_secret we currently have
+# def decrypt_incoming_payload(aes_key, raw_packet):
+#     """
+#     Seperates the 12-byte nonce from the ciphertext and decrypts it.
+#     """
+#     try:
+#         aesgcm = AESGCM(aes_key)
+#         # loads the 256 byte shared secret generated in diffi-hellman into the AES engine
 
-    aes_key = digest.finalize()
-    # The hashing function then processes the curve data and outputs a pefect random 256-bit key.
+#         nonce = raw_packet[:12]
+#         # the Nonce (Number used ONCE) is basically kinda like a 12-byte unique string added to the math to ensure that every ecnryption is unique.
+#         # here we strip out the first 12 characters by slicing as the Nonce is always stored at the start.
 
-    # Since NOW FINALLY both the laptop and the android put the exact same shared_secret into the exact same SHA-256 hashing function they both give out the EXACT SAME 256-bit AES key.
+#         ciphertext = raw_packet[12:] #The rest is the encrypted data
 
-    print(f"[DEBUG] Current AES Key: {aes_key.hex()}")
+#         decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None) #Decrypting the data
+#         # the nonce key and the rest of the ciphertext is given to the decrypt function. It checks if the data
+#         # was tampered with and if so the SHA fingerprint won't match and put out a exception.
 
-    return aes_key
-
-def decrypt_incoming_payload(aes_key, raw_packet):
-    """
-    Seperates the 12-byte nonce from the ciphertext and decrypts it.
-    """
-    try:
-        aesgcm = AESGCM(aes_key)
-        # loads the 256 byte shared secret generated in diffi-hellman into the AES engine
-
-        nonce = raw_packet[:12]
-        # the Nonce (Number used ONCE) is basically kinda like a 12-byte unique string added to the math to ensure that every ecnryption is unique.
-        # here we strip out the first 12 characters by slicing as the Nonce is always stored at the start.
-
-        ciphertext = raw_packet[12:] #The rest is the encrypted data
-
-        decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None) #Decrypting the data
-        # the nonce key and the rest of the ciphertext is given to the decrypt function. It checks if the data
-        # was tampered with and if so the SHA fingerprint won't match and put out a exception.
-
-        return decrypted_bytes.decode('utf-8') # Converts the raw bytes to standard text string so can be pasted into the windows clipboard
-    except Exception as e:
-        print(f"Decryption Failed :( The packet may be corrupted: {e}")
-        return None
+#         return decrypted_bytes.decode('utf-8') # Converts the raw bytes to standard text string so can be pasted into the windows clipboard
+#     except Exception as e:
+#         print(f"Decryption Failed :( The packet may be corrupted: {e}")
+#         return None
 
 def start_p2p_listener(aes_key):
     """
@@ -346,52 +287,52 @@ def start_p2p_listener(aes_key):
             # Since TCP connectios take up system memory it's important to clos the connection once the data is recieved and copied to the clipboard. Furthermore
             # the flow will then cycle back to the top and wait at server.accept() to wait for the next time we copy something on our phone.
 
-def send_secure_payload(target_ip, aes_key, plaintext_data):
-    """
-    Encrypts data using AES-GCM and pushes it directly to the target node.
-    """
-    try:
-        aesgcm = AESGCM(aes_key) # Initializing AES-GCM with our shared key
-        nonce = os.urandom(12) # Generating a random 12-byte nonce (Number used ONCE) for this specific message
-        encrypted_payload = aesgcm.encrypt(nonce, plaintext_data.encode('utf-8'), None) # Encrypting the plaintext string
-        final_packet = nonce + encrypted_payload # Packaging the nonce and the encrypted data together (reciever needs nonce to decrpyt it)
+# def send_secure_payload(target_ip, aes_key, plaintext_data):
+#     """
+#     Encrypts data using AES-GCM and pushes it directly to the target node.
+#     """
+#     try:
+#         aesgcm = AESGCM(aes_key) # Initializing AES-GCM with our shared key
+#         nonce = os.urandom(12) # Generating a random 12-byte nonce (Number used ONCE) for this specific message
+#         encrypted_payload = aesgcm.encrypt(nonce, plaintext_data.encode('utf-8'), None) # Encrypting the plaintext string
+#         final_packet = nonce + encrypted_payload # Packaging the nonce and the encrypted data together (reciever needs nonce to decrpyt it)
         
-        # print(f"[DEBUG] Opening TCP Socket to {target_ip}:{PORT}")
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #Opening an outbound TCP socket connection
-        client_socket.settimeout(5) #Not hanging forever if the target drops.
+#         # print(f"[DEBUG] Opening TCP Socket to {target_ip}:{PORT}")
+#         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #Opening an outbound TCP socket connection
+#         client_socket.settimeout(5) #Not hanging forever if the target drops.
 
-        print(f"Connecting directly to target node at {target_ip}:{PORT}...")
-        client_socket.connect((target_ip, PORT)) #Connecting to the target's IP and the agreed upon port number
+#         print(f"Connecting directly to target node at {target_ip}:{PORT}...")
+#         client_socket.connect((target_ip, PORT)) #Connecting to the target's IP and the agreed upon port number
 
-        print("[DEBUG] Socket Connected! Pushing Bytes")
+#         print("[DEBUG] Socket Connected! Pushing Bytes")
 
-        print(f"[DEBUG] Sending {len(final_packet)} bytes over TCP.")
-        client_socket.sendall(final_packet) # Streaming raw bytes
+#         print(f"[DEBUG] Sending {len(final_packet)} bytes over TCP.")
+#         client_socket.sendall(final_packet) # Streaming raw bytes
         
-        receipt = client_socket.recv(1024).decode('utf-8')
+#         receipt = client_socket.recv(1024).decode('utf-8')
 
-        if receipt == "DESYNC":
-            print("\n[DESYNC!!] Android rejected the AES Key, Keys out of synchronization")
-            print("Initiating Handshake protocol again")
-            time.sleep(3)
-            os.execl(sys.executable, sys.executable, *sys.argv)
+#         if receipt == "DESYNC":
+#             print("\n[DESYNC!!] Android rejected the AES Key, Keys out of synchronization")
+#             print("Initiating Handshake protocol again")
+#             time.sleep(3)
+#             os.execl(sys.executable, sys.executable, *sys.argv)
 
-        elif receipt == "OK":
-            print("Successfully sent payload to android")
+#         elif receipt == "OK":
+#             print("Successfully sent payload to android")
             
-        else:
-            print(f"Payload sent, however, unknown receipt encountered: {receipt}")
+#         else:
+#             print(f"Payload sent, however, unknown receipt encountered: {receipt}")
 
-    except ConnectionRefusedError:
-        print("[DESYNC] Client refused to connect! Android closed the door.")
-        print("Android might be requesting new E2EE keys.")
-        time.sleep(3)
-        os.execl(sys.executable, sys.executable, *sys.argv)
+#     except ConnectionRefusedError:
+#         print("[DESYNC] Client refused to connect! Android closed the door.")
+#         print("Android might be requesting new E2EE keys.")
+#         time.sleep(3)
+#         os.execl(sys.executable, sys.executable, *sys.argv)
 
-    except Exception as e:
-        print(f"Failed to send data to target: {e}")
-    finally:
-        client_socket.close()
+#     except Exception as e:
+#         print(f"Failed to send data to target: {e}")
+#     finally:
+#         client_socket.close()
 
 def monitor_clipboard_and_send(target_ip, aes_key):
     """
