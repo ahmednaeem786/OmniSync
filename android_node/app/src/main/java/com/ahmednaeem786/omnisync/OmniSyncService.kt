@@ -144,10 +144,16 @@ class OmniSyncService: Service() {
                     val clientSocket: Socket = serverSocket!!.accept()
                     Log.d(TAG, "Incoming payload detected from: ${clientSocket.inetAddress.hostAddress}")
 
-                    handleIncomingConnection(clientSocket)
+                    Thread { handleIncomingConnection(clientSocket) }.start()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Socket Server Error: ${e.message}")
+                Log.w(TAG, "TCP Listener shut down: ${e.message}")
+            }
+
+            if (isRunning) {
+                Log.i(TAG, "Restarting handshake protocol to resynchronize with Python...")
+                Thread.sleep(2000)
+                performHandshake()
             }
         }
     }
@@ -173,29 +179,34 @@ class OmniSyncService: Service() {
 
                 if (bytesRead > 0) {
 
-                    // DEBUG
                     Log.e(TAG, "[DEBUG] Received $bytesRead bytes of data over TCP.")
 
                     val rawPacket = buffer.copyOfRange(0, bytesRead)
 
                     val plaintext = CryptoHelper.decryptPayload(aesKey, rawPacket)
 
-                    if (plaintext != null) {
-                        Log.i(TAG, "Successfully Decrypted Payload: '$plaintext")
-                        updateSystemClipboard(plaintext)
-                    } else {
-                        Log.w(TAG, "Received packet, but decryption failed.")
-                    }
+                    Log.i(TAG, "Successfully Decrypted Payload: '$plaintext")
+                    updateSystemClipboard(plaintext)
                 }
+            } catch (e: java.security.GeneralSecurityException)
+            {
+                Log.e(TAG, "SYNCHRONIZATION LOST. Python might have restarted")
+                try {
+                    serverSocket?.close()
+                } catch (ignored: Exception) {}
+            } catch (e: java.io.IOException) {
+                Log.w(TAG, "Network dropped while receiving packet: ${e.message}")
             } catch (e: Exception) {
-                Log.e(TAG, "Error handling connection: ${e.message}")
+                Log.e(TAG, "Unknown error in socket handler: ${e.message}")
             } finally {
-                socket.close()
+                try {
+                    socket.close()
+                } catch (ignored: Exception) {}
             }
         }
     }
 
-    private fun updateSystemClipboard(text: String) {
+    private fun updateSystemClipboard(text: String?) {
         /*
         Handler(Looper.getMainLooper()).post hands the code block to the main thread so it can
         update the system clipboard.

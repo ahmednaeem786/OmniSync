@@ -129,7 +129,7 @@ class CryptoHelper {
 
             } catch (e: Exception) {
                 e.printStackTrace()
-                null
+                throw e
             }
         }
     }
