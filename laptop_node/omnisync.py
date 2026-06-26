@@ -1,5 +1,6 @@
 import os
 import time
+import sys
 import socket
 import requests
 import threading
@@ -366,7 +367,26 @@ def send_secure_payload(target_ip, aes_key, plaintext_data):
 
         print(f"[DEBUG] Sending {len(final_packet)} bytes over TCP.")
         client_socket.sendall(final_packet) # Streaming raw bytes
-        print("Encrypted payload successfully transmitted!")
+        
+        receipt = client_socket.recv(1024).decode('utf-8')
+
+        if receipt == "DESYNC":
+            print("\n[DESYNC!!] Android rejected the AES Key, Keys out of synchronization")
+            print("Initiating Handshake protocol again")
+            time.sleep(3)
+            os.execl(sys.executable, sys.executable, *sys.argv)
+
+        elif receipt == "OK":
+            print("Successfully sent payload to android")
+            
+        else:
+            print(f"Payload sent, however, unknown receipt encountered: {receipt}")
+
+    except ConnectionRefusedError:
+        print("[DESYNC] Client refused to connect! Android closed the door.")
+        print("Android might be requesting new E2EE keys.")
+        time.sleep(3)
+        os.execl(sys.executable, sys.executable, *sys.argv)
 
     except Exception as e:
         print(f"Failed to send data to target: {e}")
