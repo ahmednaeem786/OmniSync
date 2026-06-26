@@ -174,16 +174,20 @@ class OmniSyncService: Service() {
         thread(start = true) {
             try {
                 val inputStream = DataInputStream(socket.getInputStream())
+                val outputStream = socket.getOutputStream()
                 val buffer = ByteArray(4096)
                 val bytesRead = inputStream.read(buffer)
 
                 if (bytesRead > 0) {
 
                     Log.e(TAG, "[DEBUG] Received $bytesRead bytes of data over TCP.")
-
                     val rawPacket = buffer.copyOfRange(0, bytesRead)
 
                     val plaintext = CryptoHelper.decryptPayload(aesKey, rawPacket)
+                        ?: throw java.security.GeneralSecurityException("CryptoHelper returns null! There is a AES Key mismatch :(")
+
+                    outputStream.write("OK".toByteArray(Charsets.UTF_8))
+                    outputStream.flush()
 
                     Log.i(TAG, "Successfully Decrypted Payload: '$plaintext")
                     updateSystemClipboard(plaintext)
@@ -192,8 +196,14 @@ class OmniSyncService: Service() {
             {
                 Log.e(TAG, "SYNCHRONIZATION LOST. Python might have restarted")
                 try {
+                    socket.getOutputStream().write("DESYNC".toByteArray(Charsets.UTF_8))
+                    socket.getOutputStream().flush()
+                } catch (ignored: Exception) {}
+
+                try {
                     serverSocket?.close()
                 } catch (ignored: Exception) {}
+
             } catch (e: java.io.IOException) {
                 Log.w(TAG, "Network dropped while receiving packet: ${e.message}")
             } catch (e: Exception) {
