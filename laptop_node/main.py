@@ -61,134 +61,134 @@ def save_to_db(content, source_device):
     except Exception as e:
         print(f"Database Error: {e}")
 
-def get_local_ip():
-    """
-    Bypasses local routing to find actual LAN IP address.
-    """
+# def get_local_ip():
+#     """
+#     Bypasses local routing to find actual LAN IP address.
+#     """
 
-    my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    # Asks OS to provide a raw network portal so the script can communicate over a network
-    # socket.AF_INET basically specifies the address faimily i.e. either IPv4 or IPv6
-    # since here it's only written simply as AF_INET, it defaults to IPv4, if wanted IPv6 then could've basically
-    # added it as AF_INET6
+#     my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+#     # Asks OS to provide a raw network portal so the script can communicate over a network
+#     # socket.AF_INET basically specifies the address faimily i.e. either IPv4 or IPv6
+#     # since here it's only written simply as AF_INET, it defaults to IPv4, if wanted IPv6 then could've basically
+#     # added it as AF_INET6
 
-    # socket.SOCK_DGRAM specifies that it's a datagram socket i.e. used for UDP communication, meaning we are going
-    # to be using the UDP protocol. Used UDP since TCP requires a three-way handshake to establish connection and in case
-    # there is no target, TCP would just hang and wait whereas UDP in this case is a connectionless fire and forget protocol so
-    # it doesn't really care if the destination exists or not it just prepares the packet to leave the script.
-    try:
-        my_socket.connect(('10.255.255.255', 1))
-        # tells the socket to connect to the given target IP using the given target port i.e. '1' in this case
-        # 10.255.255.255 is a basically unroutable, fake IP address and no data is actually send over our network. Basically, when this
-        # line executes, the OS looks at its internal routing table and the OS says if the program wants to send a UDP packet i.e. a datagram
-        # 10.255.255.255 which of the network cards it should use could be Wi-Fi or ethernet etc so then OS select the active network card
-        # i.e. the one which could have a network access and assigns the socket a local origin point
-        ip = my_socket.getsockname()[0]
-        # Built-in function which checks the socket and returns a *tuple* containing the source configuration i.e.
-        # (local_ip, local_port) so since we only care about the local IP we take the first element of the tuple using [0]
-    except Exception:
-        ip = '127.0.0.1'
-        # Safety net i.e. in case windows has no network access like maybe on a airplane then the OS routing table
-        # might panic since no active network cards to choose from. This except block catches this error and falls back to 127.0.0.1
-        # which is basically the loopback address a.k.a localhost like the computer itself. (example like when we used to run websites locally during development on a laptop itself)
-    finally:
-        my_socket.close()
-        # If we DON'T close the socket we risk having a resource leak, plus it would also free up resources.
-    return ip
-
-
-def broadcast_presence(local_ip, public_key):
-    """
-    Sends the IP and Public Key via a JSON body.
-    """
-    url = f"{SIGNALING_SERVER}/dweet/for/{SYNC_CHANNEL}-{MY_ROLE}"
-
-    print(f"[DEBUG] Dweet URL: {url}")
-
-    print(f"Broadcasting presence to Dweet.cc through JSON POST")
-
-    try:
-        payload = {
-            "ip": local_ip,
-            "public_key": public_key,
-            "timestamp": int(time.time())
-        }
-
-        # response = requests.post(url, json=payload, timeout=3) # TODO: DEBUGGGING
-
-        response = requests.post(url, data=payload, timeout=3)
+#     # socket.SOCK_DGRAM specifies that it's a datagram socket i.e. used for UDP communication, meaning we are going
+#     # to be using the UDP protocol. Used UDP since TCP requires a three-way handshake to establish connection and in case
+#     # there is no target, TCP would just hang and wait whereas UDP in this case is a connectionless fire and forget protocol so
+#     # it doesn't really care if the destination exists or not it just prepares the packet to leave the script.
+#     try:
+#         my_socket.connect(('10.255.255.255', 1))
+#         # tells the socket to connect to the given target IP using the given target port i.e. '1' in this case
+#         # 10.255.255.255 is a basically unroutable, fake IP address and no data is actually send over our network. Basically, when this
+#         # line executes, the OS looks at its internal routing table and the OS says if the program wants to send a UDP packet i.e. a datagram
+#         # 10.255.255.255 which of the network cards it should use could be Wi-Fi or ethernet etc so then OS select the active network card
+#         # i.e. the one which could have a network access and assigns the socket a local origin point
+#         ip = my_socket.getsockname()[0]
+#         # Built-in function which checks the socket and returns a *tuple* containing the source configuration i.e.
+#         # (local_ip, local_port) so since we only care about the local IP we take the first element of the tuple using [0]
+#     except Exception:
+#         ip = '127.0.0.1'
+#         # Safety net i.e. in case windows has no network access like maybe on a airplane then the OS routing table
+#         # might panic since no active network cards to choose from. This except block catches this error and falls back to 127.0.0.1
+#         # which is basically the loopback address a.k.a localhost like the computer itself. (example like when we used to run websites locally during development on a laptop itself)
+#     finally:
+#         my_socket.close()
+#         # If we DON'T close the socket we risk having a resource leak, plus it would also free up resources.
+#     return ip
 
 
-        print(f"[DEBUG] Response URL: {response.request.url}")
-        print(f"[DEBUG] Response Body: {response.request.body}")
-        print(f"[DEBUG] Response Headers: {response.request.headers}")
+# def broadcast_presence(local_ip, public_key):
+#     """
+#     Sends the IP and Public Key via a JSON body.
+#     """
+#     url = f"{SIGNALING_SERVER}/dweet/for/{SYNC_CHANNEL}-{MY_ROLE}"
+
+#     print(f"[DEBUG] Dweet URL: {url}")
+
+#     print(f"Broadcasting presence to Dweet.cc through JSON POST")
+
+#     try:
+#         payload = {
+#             "ip": local_ip,
+#             "public_key": public_key,
+#             "timestamp": int(time.time())
+#         }
+
+#         # response = requests.post(url, json=payload, timeout=3) # TODO: DEBUGGGING
+
+#         response = requests.post(url, data=payload, timeout=3)
 
 
-        print(f"[DEBUG] Dweet Status Code: {response.status_code}")
-        print(f"[DEBUG] Dweet Server Replied {response.text}")
-
-        print("[DEBUG] INITIAL JSON Payload Successfully sent over Dweet for android device to read.")
-    except Exception as e:
-        print(f"Broadcast Failed: {e}")
-
-def listen_for_target():
-    """
-    Polls the server wating for the other device to come online.
-    """
-
-    url = f"{SIGNALING_SERVER}/get/latest/dweet/for/{SYNC_CHANNEL}-{TARGET_ROLE}"
-    # The link ha schanged here i.e. now we're looking for a message in dweet's inbox by the TARGET_ROLE i.e.
-    # in our case 'android'
-
-    print(f"Listening for {TARGET_ROLE}...")
-
-    while True:
-        try:
-            response = requests.get(url, timeout=10)
-            # Pings the url we have and then check that if the response given is OK i.e. a 200 status code
-            #  this means the android phone has broadcasted then and if not then it might return a 404 Not Found error
-
-            print(f"[DEBUG] Response URL: {response.request.url}")
-            print(f"[DEBUG] Response Text: {response.text}")
+#         print(f"[DEBUG] Response URL: {response.request.url}")
+#         print(f"[DEBUG] Response Body: {response.request.body}")
+#         print(f"[DEBUG] Response Headers: {response.request.headers}")
 
 
+#         print(f"[DEBUG] Dweet Status Code: {response.status_code}")
+#         print(f"[DEBUG] Dweet Server Replied {response.text}")
 
-            if response.status_code == 200:
-                data = response.json()
-                if "with" in data and len(data["with"]) > 0:
-                    content = data["with"][0]["content"]
-                    # If the android successfully broadcast, then the server sends the data as a giant block of text, the code i.e. 'response.json()' converts that text into a python dictionary
-                    # further on we use slicing to look for the 'with' keyword and then in that we look for the 'content' keyword since dweet wraps data in layers.
+#         print("[DEBUG] INITIAL JSON Payload Successfully sent over Dweet for android device to read.")
+#     except Exception as e:
+#         print(f"Broadcast Failed: {e}")
 
-                    if "ip" in content and "public_key" in content and "timestamp" in content:
-                        target_timestamp = int(content.get("timestamp"))
-                        current_time = int(time.time())
+# def listen_for_target():
+#     """
+#     Polls the server wating for the other device to come online.
+#     """
 
-                        age_in_seconds = current_time - target_timestamp
+#     url = f"{SIGNALING_SERVER}/get/latest/dweet/for/{SYNC_CHANNEL}-{TARGET_ROLE}"
+#     # The link ha schanged here i.e. now we're looking for a message in dweet's inbox by the TARGET_ROLE i.e.
+#     # in our case 'android'
 
-                        if age_in_seconds > 60:
-                            print(f"Found a old Android key i.e. {age_in_seconds}s old. Waiting for a fresh key...")
-                            time.sleep(3)
-                            continue
+#     print(f"Listening for {TARGET_ROLE}...")
 
-                    """[DEBUGGING CODE]"""
+#     while True:
+#         try:
+#             response = requests.get(url, timeout=10)
+#             # Pings the url we have and then check that if the response given is OK i.e. a 200 status code
+#             #  this means the android phone has broadcasted then and if not then it might return a 404 Not Found error
 
-                    target_ip = content.get("ip")
-                    target_pub_key = content.get("public_key")
-
-                    if target_ip and target_pub_key:
-                        print(f"\n[DEBUG] Recorded Android IP: {target_ip}")
-                        print(f"\n[DEBUG] Recorded Android Public Key: {target_pub_key}")
+#             print(f"[DEBUG] Response URL: {response.request.url}")
+#             print(f"[DEBUG] Response Text: {response.text}")
 
 
-                    print(f"Found the {TARGET_ROLE} with IP: {content['ip']}")
-                    return content["ip"], content["public_key"]
-                # The moment the script finds the data, the return statement kills the infinite while True loop and passes the android's IP
-                # and public key that is given in the data to the main script so it can start deriving shared key
-        except Exception as e:
-            print(f"[ERROR] Loop crashed because: {e}")
-            pass
-        time.sleep(3)
+
+#             if response.status_code == 200:
+#                 data = response.json()
+#                 if "with" in data and len(data["with"]) > 0:
+#                     content = data["with"][0]["content"]
+#                     # If the android successfully broadcast, then the server sends the data as a giant block of text, the code i.e. 'response.json()' converts that text into a python dictionary
+#                     # further on we use slicing to look for the 'with' keyword and then in that we look for the 'content' keyword since dweet wraps data in layers.
+
+#                     if "ip" in content and "public_key" in content and "timestamp" in content:
+#                         target_timestamp = int(content.get("timestamp"))
+#                         current_time = int(time.time())
+
+#                         age_in_seconds = current_time - target_timestamp
+
+#                         if age_in_seconds > 60:
+#                             print(f"Found a old Android key i.e. {age_in_seconds}s old. Waiting for a fresh key...")
+#                             time.sleep(3)
+#                             continue
+
+#                     """[DEBUGGING CODE]"""
+
+#                     target_ip = content.get("ip")
+#                     target_pub_key = content.get("public_key")
+
+#                     if target_ip and target_pub_key:
+#                         print(f"\n[DEBUG] Recorded Android IP: {target_ip}")
+#                         print(f"\n[DEBUG] Recorded Android Public Key: {target_pub_key}")
+
+
+#                     print(f"Found the {TARGET_ROLE} with IP: {content['ip']}")
+#                     return content["ip"], content["public_key"]
+#                 # The moment the script finds the data, the return statement kills the infinite while True loop and passes the android's IP
+#                 # and public key that is given in the data to the main script so it can start deriving shared key
+#         except Exception as e:
+#             print(f"[ERROR] Loop crashed because: {e}")
+#             pass
+#         time.sleep(3)
 
 # def derive_shared_key(private_key, target_public_key_b64):
 #     """
