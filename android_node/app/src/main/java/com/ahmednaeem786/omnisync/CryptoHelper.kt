@@ -14,6 +14,7 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 import android.util.Log
+import java.security.SecureRandom
 
 /*
 This acts like the translator for both the devices i.e. the Windows-side python script
@@ -130,6 +131,27 @@ class CryptoHelper {
             } catch (e: Exception) {
                 e.printStackTrace()
                 throw e
+            }
+        }
+
+        fun encryptPayload(aesKeyBytes: ByteArray, plainData: String): ByteArray? {
+
+            return try {
+                val nonce = ByteArray(12)
+                SecureRandom().nextBytes(nonce)
+
+                val secretKey = SecretKeySpec(aesKeyBytes, "AES")
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+
+                val spec = GCMParameterSpec(128, nonce)
+
+                cipher.init(Cipher.ENCRYPT_MODE, secretKey, spec)
+                val ciphertext = cipher.doFinal(plainData.toByteArray(Charsets.UTF_8))
+
+                nonce + ciphertext
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
             }
         }
     }

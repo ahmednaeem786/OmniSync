@@ -21,9 +21,15 @@ import kotlin.concurrent.thread
 
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.URL
 import java.net.URLEncoder
+
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /*
 This is the main core of the Android app. It is a foreground service which is basically a special
@@ -300,119 +306,286 @@ class OmniSyncService: Service() {
         return "127.0.0.1"
     }
 
+//    private fun performHandshake() {
+//        /*
+//        This function first asks the internal functions from CryptoHelper to generate a key pair and
+//        from the elliptic curve and then also formats it as a Base64 String. It then also stores our
+//        local IP address.
+//        URLEncoder.encode(,) then translates the public key into a UTF-8 format so it's safe to send
+//        over the web and later on is appended with the IP into the URL.
+//        broadcastConn contains the procedure to send the URL onto the dweet server with a GET request
+//        method and also spoofs by setting the user-agent to Mozilla/5.0....
+//        After broadcast is sent over Dweet server the phone then switches into a listening mode
+//        where it monitors the '-laptop' channel and then enters a while loop until the laptopPubKey
+//        is found.
+//        If the Dweet server returns a 200 OK status then the program reads the text and parses the
+//        text received in JSON to extract the IP address and public key, however, if the Dweet server
+//        hasn't returned the text yet, the thread goes to sleep for 3 seconds to avoid getting a IP ban.
+//        Then the laptop's public key and the phone's private key is fed into the Diffie-Hellman
+//        procedure to determine the exactly same 256-bit AES key as the python script.
+//        After determining the AES key, it triggers startTcpListener() to start syncing clipboards.
+//         */
+//        thread(start = true, name = "HandshakeThread") {
+//            try {
+//                Log.i(TAG, "Starting Dweet Handshake...")
+//                val channel = "omnisync-default-fallback-channel"
+//
+//                val keyPair = CryptoHelper.generateKeyPair()
+//                val myPublicKeyStr = CryptoHelper.getPublicKeyString(keyPair)
+//                val myIp = getLocalIpAddress()
+//                val encodedKey = URLEncoder.encode(myPublicKeyStr, "UTF-8")
+//                val currentUnixTime = System.currentTimeMillis() / 1000
+//
+//                val broadcastUrl = URL("https://dweet.cc/dweet/for/$channel-android")
+//                val broadcastConn = broadcastUrl.openConnection() as HttpURLConnection
+//                broadcastConn.requestMethod = "POST"
+//
+//                broadcastConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+//                broadcastConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+//                broadcastConn.doOutput = true
+//
+//                val encodedIp = URLEncoder.encode(myIp, "UTF-8")
+//                val formPayload = "ip=$encodedIp&public_key=$encodedKey&timestamp=$currentUnixTime"
+//
+//                broadcastConn.outputStream.use { os ->
+//                    val input = formPayload.toByteArray(Charsets.UTF_8)
+//                    os.write(input, 0, input.size)
+//                }
+//
+//                val responseCode = broadcastConn.responseCode
+//                val responseText = if (responseCode == 200) {
+//                    broadcastConn.inputStream.bufferedReader().readText()
+//                } else {
+//                    broadcastConn.errorStream?.bufferedReader()?.readText() ?: "Unknown Server Error"
+//                }
+//
+//                Log.d(TAG, "Broadcast sent. Server Response Code: $responseCode")
+//                Log.d(TAG, "[DEBUG] Dweet Server's Response Text: $responseText")
+//
+//                val getUrl = URL("https://dweet.cc/get/latest/dweet/for/$channel-laptop")
+//                var laptopPubKey: String? = null
+//
+//                while (laptopPubKey == null && isRunning) {
+//                    val getConn = getUrl.openConnection() as HttpURLConnection
+//                    getConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+//
+//                    if (getConn.responseCode == 200) {
+//                        val response = getConn.inputStream.bufferedReader().readText()
+//
+//                        Log.e(TAG, "[DEBUG] Raw Dweet Content Received: $response")
+//
+//                        val json = JSONObject(response)
+//
+//                        if (json.has("with")) {
+//                            val content = json.getJSONArray("with").getJSONObject(0).getJSONObject("content")
+//
+//                            val targetTimestamp = content.optLong("timestamp", 0L)
+//                            val currentTime = System.currentTimeMillis() / 1000
+//                            val ageInSeconds = currentTime - targetTimestamp
+//
+//                            if (ageInSeconds > 60)
+//                            {
+//                                Log.e(TAG, "Found a old Laptop Key i.e. ${ageInSeconds}s old. Waiting for a fresh one...")
+//                            }
+//                            else
+//                            {
+//                                val laptopIp = content.getString("ip")
+//                                laptopPubKey = content.getString("public_key")
+//                                Log.i(TAG, "Found Laptop at IP: $laptopIp")
+//                            }
+//
+//
+//                            Log.i(TAG, "[DEBUG] Laptop's Public Key: $laptopPubKey")
+//
+//                        }
+//                    }
+//                    if (laptopPubKey == null) Thread.sleep(3000)
+//                }
+//
+//                if (laptopPubKey != null) {
+//                    Log.e(TAG, "[DEBUG] My Android Public Key: ${myPublicKeyStr.take(20)}")
+//                    Log.e(TAG, "[DEBUG] Laptop's Public Key: ${laptopPubKey.take(20)}")
+//
+//                    aesKey = CryptoHelper.deriveSharedKey(keyPair.private, laptopPubKey)
+//                    Log.i(TAG, "Success!! Phase 1 Complete. E2EE Key Locked.")
+//
+//                    // DEBUG
+//                    val hexKey = aesKey.joinToString("") { "%02x".format(it) }
+//                    Log.e(TAG, "[DEBUG] Current AES Key: $hexKey")
+//
+//                    startTcpListener()
+//                }
+//            } catch (e: Exception) {
+//                Log.e(TAG, "Handshake Error: ${e.message}")
+//            }
+//        }
+//    }
+
     private fun performHandshake() {
-        /*
-        This function first asks the internal functions from CryptoHelper to generate a key pair and
-        from the elliptic curve and then also formats it as a Base64 String. It then also stores our
-        local IP address.
-        URLEncoder.encode(,) then translates the public key into a UTF-8 format so it's safe to send
-        over the web and later on is appended with the IP into the URL.
-        broadcastConn contains the procedure to send the URL onto the dweet server with a GET request
-        method and also spoofs by setting the user-agent to Mozilla/5.0....
-        After broadcast is sent over Dweet server the phone then switches into a listening mode
-        where it monitors the '-laptop' channel and then enters a while loop until the laptopPubKey
-        is found.
-        If the Dweet server returns a 200 OK status then the program reads the text and parses the
-        text received in JSON to extract the IP address and public key, however, if the Dweet server
-        hasn't returned the text yet, the thread goes to sleep for 3 seconds to avoid getting a IP ban.
-        Then the laptop's public key and the phone's private key is fed into the Diffie-Hellman
-        procedure to determine the exactly same 256-bit AES key as the python script.
-        After determining the AES key, it triggers startTcpListener() to start syncing clipboards.
-         */
         thread(start = true, name = "HandshakeThread") {
-            try {
-                Log.i(TAG, "Starting Dweet Handshake...")
-                val channel = "omnisync-default-fallback-channel"
 
-                val keyPair = CryptoHelper.generateKeyPair()
-                val myPublicKeyStr = CryptoHelper.getPublicKeyString(keyPair)
-                val myIp = getLocalIpAddress()
-                val encodedKey = URLEncoder.encode(myPublicKeyStr, "UTF-8")
-                val currentUnixTime = System.currentTimeMillis() / 1000
+            Log.i(TAG, "Starting Dweet Handshake")
+            val channel = "omnisync-default-fallback-channel"
 
-                val broadcastUrl = URL("https://dweet.cc/dweet/for/$channel-android")
-                val broadcastConn = broadcastUrl.openConnection() as HttpURLConnection
-                broadcastConn.requestMethod = "POST"
+            val keyPair = CryptoHelper.generateKeyPair()
+            val myPublicKeyStr = CryptoHelper.getPublicKeyString(keyPair)
+            val myIp = getLocalIpAddress()
+            val encodedKey = URLEncoder.encode(myPublicKeyStr, "UTF-8")
+            val currentUnixTime = System.currentTimeMillis() / 1000
 
-                broadcastConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                broadcastConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                broadcastConn.doOutput = true
+            val broadcastUrl = URL("https://dweet.cc/dweet/for/$channel-android")
+            val broadcastConn = broadcastUrl.openConnection() as HttpURLConnection
+            broadcastConn.requestMethod = "POST"
 
-                val encodedIp = URLEncoder.encode(myIp, "UTF-8")
-                val formPayload = "ip=$encodedIp&public_key=$encodedKey&timestamp=$currentUnixTime"
+            broadcastConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            broadcastConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            broadcastConn.doOutput = true
 
-                broadcastConn.outputStream.use { os ->
-                    val input = formPayload.toByteArray(Charsets.UTF_8)
-                    os.write(input, 0, input.size)
-                }
+            val encodedIp = URLEncoder.encode(myIp, "UTF-8")
+            val formPayload = "ip=$encodedIp&public_key=$encodedKey&timestamp=$currentUnixTime"
 
-                val responseCode = broadcastConn.responseCode
-                val responseText = if (responseCode == 200) {
-                    broadcastConn.inputStream.bufferedReader().readText()
-                } else {
-                    broadcastConn.errorStream?.bufferedReader()?.readText() ?: "Unknown Server Error"
-                }
+            broadcastConn.outputStream.use { os ->
+                val input = formPayload.toByteArray(Charsets.UTF_8)
+                os.write(input, 0, input.size)
+            }
 
-                Log.d(TAG, "Broadcast sent. Server Response Code: $responseCode")
+            val responseCode = broadcastConn.responseCode
+            val responseText = if (responseCode == 200) {
+                broadcastConn.inputStream.bufferedReader().readText()
+            } else {
+                broadcastConn.errorStream?.bufferedReader()?.readText() ?: "Unknown Server Error"
+            }
 
-                Log.d(TAG, "[DEBUG] Dweet Server's Response Text: $responseText")
+            Log.d(TAG, "Broadcast sent. Server Response Code: $responseCode")
+            Log.d(TAG, "[DEBUG] Dweet Server's Response Text: $responseText")
 
-                val getUrl = URL("https://dweet.cc/get/latest/dweet/for/$channel-laptop")
-                var laptopPubKey: String? = null
+            val getUrl = URL("https://dweet.cc/get/latest/dweet/for/$channel-laptop")
+            var laptopPubKey: String? = null
 
-                while (laptopPubKey == null && isRunning) {
-                    val getConn = getUrl.openConnection() as HttpURLConnection
-                    getConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            while (laptopPubKey == null && isRunning) {
+                val getConn = getUrl.openConnection() as HttpURLConnection
+                getConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
-                    if (getConn.responseCode == 200) {
-                        val response = getConn.inputStream.bufferedReader().readText()
+                if (getConn.responseCode == 200) {
+                    val response = getConn.inputStream.bufferedReader().readText()
 
-                        Log.e(TAG, "[DEBUG] Raw Dweet Content Received: $response")
+                    Log.e(TAG, "[DEBUG] Raw Dweet Content Received: $response")
 
-                        val json = JSONObject(response)
+                    val json = JSONObject(response)
 
-                        if (json.has("with")) {
-                            val content = json.getJSONArray("with").getJSONObject(0).getJSONObject("content")
+                    if (json.has("with") && !json.isNull("with")) {
+                        val withArray = json.getJSONArray("with")
 
-                            val targetTimestamp = content.optLong("timestamp", 0L)
-                            val currentTime = System.currentTimeMillis() / 1000
-                            val ageInSeconds = currentTime - targetTimestamp
+                        if (withArray.length() > 0) {
+                            val firstItem = withArray.getJSONObject(0)
 
-                            if (ageInSeconds > 60)
-                            {
-                                Log.e(TAG, "Found a old Laptop Key i.e. ${ageInSeconds}s old. Waiting for a fresh one...")
+                            if (firstItem.has("created")) {
+                                val createdStr = firstItem.getString("created")
+
+                                if (isWithinLast24Hours(createdStr)) {
+
+                                    if (firstItem.has("content")) {
+                                        val content = firstItem.getJSONObject("content")
+
+                                        if (content.has("ip") && content.has("public_key")) {
+
+                                            Log.i(TAG, "[DEBUG] Encrypted Payload passes all checks.")
+
+                                            val targetIp = content.getString("ip")
+                                            val targetPubKey = content.getString("public_key")
+                                            val payloadTimestamp = content.optLong("timestamp", 0L)
+
+
+                                            aesKey = CryptoHelper.deriveSharedKey(keyPair.private,targetPubKey)
+                                            Log.i(TAG, "AES Key Derived!. Initiating Cryptographic Pinging...")
+
+                                            var isVerified = false
+
+                                            while (!isVerified && isRunning) {
+                                                try {
+                                                    Log.i(TAG, "Connecting to Python to send READY signal...")
+
+                                                    val socket = Socket()
+                                                    socket.connect(InetSocketAddress(targetIp, PORT), 5000)
+
+                                                    val outputStream = socket.getOutputStream()
+                                                    val inputStream = DataInputStream(socket.getInputStream())
+
+                                                    val readyPacket = CryptoHelper.encryptPayload(aesKey, "READY")
+                                                    outputStream.write(readyPacket)
+                                                    outputStream.flush()
+                                                    Log.i(TAG, "Encrypted READY Signal sent. Waiting for Acknowledgement")
+
+                                                    val buffer = ByteArray(4096)
+                                                    val bytesRead = inputStream.read(buffer)
+
+                                                    if (bytesRead > 0) {
+                                                        val replyPacket = buffer.copyOfRange(0, bytesRead)
+
+                                                        try {
+                                                            val decryptedReply = CryptoHelper.decryptPayload(aesKey, replyPacket)
+
+                                                            if (decryptedReply == "SYNC_ACK") {
+                                                                Log.i(TAG, "SUCCESS! Python replied with SYNC_ACK. AES Key correct on android's side..")
+                                                                isVerified = true
+                                                            } else {
+                                                                Log.w(TAG, "Decryption Successful, but Python replied: $decryptedReply instead of SYNC_ACK")
+                                                            }
+                                                        } catch (e: java.security.GeneralSecurityException) {
+                                                            Log.e(TAG, "Verification Failed: Can't decryt Python's reply due to AES Key mismatch!")
+                                                        }
+                                                    }
+
+                                                    socket.close()
+                                                } catch (e: Exception) {
+                                                    Log.w(TAG, "Unable to reach python for verification! Retrying in 3 seconds...")
+                                                }
+
+                                                if (!isVerified) {
+                                                    Thread.sleep(3000)
+                                                }
+                                            }
+
+                                            Log.i(TAG, "Verification phase completed. Starting Main TCP Listener..")
+                                        } else {
+                                            Log.w(TAG, "Ignored Payload: Missing IP or Public key in content.")
+                                        }
+                                    }
+                                } else {
+                                    Log.w(TAG, "Ignored Payload: Dweet Message older than 24 hours.")
+                                }
                             }
-                            else
-                            {
-                                val laptopIp = content.getString("ip")
-                                laptopPubKey = content.getString("public_key")
-                                Log.i(TAG, "Found Laptop at IP: $laptopIp")
-                            }
-
-
-                            Log.i(TAG, "[DEBUG] Laptop's Public Key: $laptopPubKey")
-
                         }
                     }
-                    if (laptopPubKey == null) Thread.sleep(3000)
+
+
                 }
-
-                if (laptopPubKey != null) {
-                    Log.e(TAG, "[DEBUG] My Android Public Key: ${myPublicKeyStr.take(20)}")
-                    Log.e(TAG, "[DEBUG] Laptop's Public Key: ${laptopPubKey.take(20)}")
-
-                    aesKey = CryptoHelper.deriveSharedKey(keyPair.private, laptopPubKey)
-                    Log.i(TAG, "Success!! Phase 1 Complete. E2EE Key Locked.")
-
-                    // DEBUG
-                    val hexKey = aesKey.joinToString("") { "%02x".format(it) }
-                    Log.e(TAG, "[DEBUG] Current AES Key: $hexKey")
-
-                    startTcpListener()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Handshake Error: ${e.message}")
             }
+        }
+    }
+
+
+    private fun isWithinLast24Hours(dweetDateString: String): Boolean {
+        return try {
+            // 1. We MUST tell Android this date is in UTC, not local time!
+            val format = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+            format.timeZone = TimeZone.getTimeZone("UTC")
+
+            val createdDate = format.parse(dweetDateString)
+            val now = Date() // Gets current time in UTC under the hood
+
+            if (createdDate != null) {
+                val diffInMillis = now.time - createdDate.time
+                val hoursDifference = diffInMillis / (1000 * 60 * 60)
+
+                // 2. Ensure it's between 0 and 24 hours old (0 prevents weird future-date bugs)
+                hoursDifference in 0..24
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse Dweet date string: ${e.message}")
+            false
         }
     }
 
