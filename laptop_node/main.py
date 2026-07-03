@@ -1,21 +1,10 @@
 import os
 import time
-import sys
-import socket
-import requests
-import threading
-import pyperclip
-import sqlite3
-import base64
-import urllib.parse
 from dotenv import load_dotenv
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from datetime import datetime
+from core.crypto import CryptoEngine
+from core.signaling import DweetClient
+from core.network import SecureTunnel
+from core.clipboard import ClipboardManager
 
 load_dotenv()
 
@@ -28,383 +17,90 @@ TARGET_ROLE = "android" # bubye apple, sorry you're too restrictive atp :((((( i
 
 PORT = 53317
 
-def init_db():
-    """
-    Creates the local SQLite database to store clipboard history.
-    """
-    conn = sqlite3.connect('clipboard_history.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-                   CREATE TABLE IF NOT EXISTS clipboard_history (
-                   id INTEGER PRIMARY KEY AUTOINCREMENT,
-                   content TEXT NOT NULL,
-                   source_device TEXT NOT NULL,
-                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)
-                   ''')
-    conn.commit()
-    conn.close()
-
-def save_to_db(content, source_device):
-    """
-    Saves a new clipboard item into the database
-    """
-    try:
-        conn = sqlite3.connect('clipboard_history.db')
-        cursor = conn.cursor()
-        cursor.execute('''
-                       INSERT INTO clipboard_history (content, source_device)
-                       VALUES (?, ?)
-                       ''', (content, source_device))
-        conn.commit()
-        conn.close()
-        print(f"Logged New Item from {source_device}")
-    except Exception as e:
-        print(f"Database Error: {e}")
-
-# def get_local_ip():
+# def init_db():
 #     """
-#     Bypasses local routing to find actual LAN IP address.
+#     Creates the local SQLite database to store clipboard history.
 #     """
+#     conn = sqlite3.connect('clipboard_history.db')
+#     cursor = conn.cursor()
+#     cursor.execute('''
+#                    CREATE TABLE IF NOT EXISTS clipboard_history (
+#                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+#                    content TEXT NOT NULL,
+#                    source_device TEXT NOT NULL,
+#                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)
+#                    ''')
+#     conn.commit()
+#     conn.close()
 
-#     my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-#     # Asks OS to provide a raw network portal so the script can communicate over a network
-#     # socket.AF_INET basically specifies the address faimily i.e. either IPv4 or IPv6
-#     # since here it's only written simply as AF_INET, it defaults to IPv4, if wanted IPv6 then could've basically
-#     # added it as AF_INET6
-
-#     # socket.SOCK_DGRAM specifies that it's a datagram socket i.e. used for UDP communication, meaning we are going
-#     # to be using the UDP protocol. Used UDP since TCP requires a three-way handshake to establish connection and in case
-#     # there is no target, TCP would just hang and wait whereas UDP in this case is a connectionless fire and forget protocol so
-#     # it doesn't really care if the destination exists or not it just prepares the packet to leave the script.
+# def save_to_db(content, source_device):
+#     """
+#     Saves a new clipboard item into the database
+#     """
 #     try:
-#         my_socket.connect(('10.255.255.255', 1))
-#         # tells the socket to connect to the given target IP using the given target port i.e. '1' in this case
-#         # 10.255.255.255 is a basically unroutable, fake IP address and no data is actually send over our network. Basically, when this
-#         # line executes, the OS looks at its internal routing table and the OS says if the program wants to send a UDP packet i.e. a datagram
-#         # 10.255.255.255 which of the network cards it should use could be Wi-Fi or ethernet etc so then OS select the active network card
-#         # i.e. the one which could have a network access and assigns the socket a local origin point
-#         ip = my_socket.getsockname()[0]
-#         # Built-in function which checks the socket and returns a *tuple* containing the source configuration i.e.
-#         # (local_ip, local_port) so since we only care about the local IP we take the first element of the tuple using [0]
-#     except Exception:
-#         ip = '127.0.0.1'
-#         # Safety net i.e. in case windows has no network access like maybe on a airplane then the OS routing table
-#         # might panic since no active network cards to choose from. This except block catches this error and falls back to 127.0.0.1
-#         # which is basically the loopback address a.k.a localhost like the computer itself. (example like when we used to run websites locally during development on a laptop itself)
-#     finally:
-#         my_socket.close()
-#         # If we DON'T close the socket we risk having a resource leak, plus it would also free up resources.
-#     return ip
-
-
-# def broadcast_presence(local_ip, public_key):
-#     """
-#     Sends the IP and Public Key via a JSON body.
-#     """
-#     url = f"{SIGNALING_SERVER}/dweet/for/{SYNC_CHANNEL}-{MY_ROLE}"
-
-#     print(f"[DEBUG] Dweet URL: {url}")
-
-#     print(f"Broadcasting presence to Dweet.cc through JSON POST")
-
-#     try:
-#         payload = {
-#             "ip": local_ip,
-#             "public_key": public_key,
-#             "timestamp": int(time.time())
-#         }
-
-#         # response = requests.post(url, json=payload, timeout=3) # TODO: DEBUGGGING
-
-#         response = requests.post(url, data=payload, timeout=3)
-
-
-#         print(f"[DEBUG] Response URL: {response.request.url}")
-#         print(f"[DEBUG] Response Body: {response.request.body}")
-#         print(f"[DEBUG] Response Headers: {response.request.headers}")
-
-
-#         print(f"[DEBUG] Dweet Status Code: {response.status_code}")
-#         print(f"[DEBUG] Dweet Server Replied {response.text}")
-
-#         print("[DEBUG] INITIAL JSON Payload Successfully sent over Dweet for android device to read.")
+#         conn = sqlite3.connect('clipboard_history.db')
+#         cursor = conn.cursor()
+#         cursor.execute('''
+#                        INSERT INTO clipboard_history (content, source_device)
+#                        VALUES (?, ?)
+#                        ''', (content, source_device))
+#         conn.commit()
+#         conn.close()
+#         print(f"Logged New Item from {source_device}")
 #     except Exception as e:
-#         print(f"Broadcast Failed: {e}")
-
-# def listen_for_target():
-#     """
-#     Polls the server wating for the other device to come online.
-#     """
-
-#     url = f"{SIGNALING_SERVER}/get/latest/dweet/for/{SYNC_CHANNEL}-{TARGET_ROLE}"
-#     # The link ha schanged here i.e. now we're looking for a message in dweet's inbox by the TARGET_ROLE i.e.
-#     # in our case 'android'
-
-#     print(f"Listening for {TARGET_ROLE}...")
-
-#     while True:
-#         try:
-#             response = requests.get(url, timeout=10)
-#             # Pings the url we have and then check that if the response given is OK i.e. a 200 status code
-#             #  this means the android phone has broadcasted then and if not then it might return a 404 Not Found error
-
-#             print(f"[DEBUG] Response URL: {response.request.url}")
-#             print(f"[DEBUG] Response Text: {response.text}")
-
-
-
-#             if response.status_code == 200:
-#                 data = response.json()
-#                 if "with" in data and len(data["with"]) > 0:
-#                     content = data["with"][0]["content"]
-#                     # If the android successfully broadcast, then the server sends the data as a giant block of text, the code i.e. 'response.json()' converts that text into a python dictionary
-#                     # further on we use slicing to look for the 'with' keyword and then in that we look for the 'content' keyword since dweet wraps data in layers.
-
-#                     if "ip" in content and "public_key" in content and "timestamp" in content:
-#                         target_timestamp = int(content.get("timestamp"))
-#                         current_time = int(time.time())
-
-#                         age_in_seconds = current_time - target_timestamp
-
-#                         if age_in_seconds > 60:
-#                             print(f"Found a old Android key i.e. {age_in_seconds}s old. Waiting for a fresh key...")
-#                             time.sleep(3)
-#                             continue
-
-#                     """[DEBUGGING CODE]"""
-
-#                     target_ip = content.get("ip")
-#                     target_pub_key = content.get("public_key")
-
-#                     if target_ip and target_pub_key:
-#                         print(f"\n[DEBUG] Recorded Android IP: {target_ip}")
-#                         print(f"\n[DEBUG] Recorded Android Public Key: {target_pub_key}")
-
-
-#                     print(f"Found the {TARGET_ROLE} with IP: {content['ip']}")
-#                     return content["ip"], content["public_key"]
-#                 # The moment the script finds the data, the return statement kills the infinite while True loop and passes the android's IP
-#                 # and public key that is given in the data to the main script so it can start deriving shared key
-#         except Exception as e:
-#             print(f"[ERROR] Loop crashed because: {e}")
-#             pass
-#         time.sleep(3)
-
-# def derive_shared_key(private_key, target_public_key_b64):
-#     """
-#     Combines private key + target's public key to derive shared secret key.
-#     """
-#     target_bytes = base64.b64decode(target_public_key_b64)
-#     peer_public_key = serialization.load_der_public_key(target_bytes)
-#     shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
-
-#     print(f"[DEBUG] Python-side Raw Shared Secret: {shared_secret.hex()}")
-
-#     digest = hashes.Hash(hashes.SHA256())
-
-#     digest.update(shared_secret)
-#     aes_key = digest.finalize()
-
-#     print(f"[DEBUG] Current AES Key: {aes_key.hex()}")
-
-#     return aes_key
-
-# def decrypt_incoming_payload(aes_key, raw_packet):
-#     """
-#     Seperates the 12-byte nonce from the ciphertext and decrypts it.
-#     """
-#     try:
-#         aesgcm = AESGCM(aes_key)
-#         # loads the 256 byte shared secret generated in diffi-hellman into the AES engine
-
-#         nonce = raw_packet[:12]
-#         # the Nonce (Number used ONCE) is basically kinda like a 12-byte unique string added to the math to ensure that every ecnryption is unique.
-#         # here we strip out the first 12 characters by slicing as the Nonce is always stored at the start.
-
-#         ciphertext = raw_packet[12:] #The rest is the encrypted data
-
-#         decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None) #Decrypting the data
-#         # the nonce key and the rest of the ciphertext is given to the decrypt function. It checks if the data
-#         # was tampered with and if so the SHA fingerprint won't match and put out a exception.
-
-#         return decrypted_bytes.decode('utf-8') # Converts the raw bytes to standard text string so can be pasted into the windows clipboard
-#     except Exception as e:
-#         print(f"Decryption Failed :( The packet may be corrupted: {e}")
-#         return None
-
-def start_p2p_listener(aes_key):
-    """
-    Opens a secure, local network socket port to listen for incoming data from Android
-    """
-    
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # Again we are creating a socket using IPv4, however, this time we are using SOCK_STREAM which basically tells the OS to use TCP instead of UDP. This create
-    # a two-way connection between both the devices. 
-
-    # Re-using the port if script restarts quickly
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # The SO_REUSEADDR basically tells the OS that if the port was recently used then it forcefully takes it over and re-uses it immidiately without waiting.
-
-    server.bind(('0.0.0.0', PORT))
-    server.listen(1)
-    # The first line is a special wildcard that basically tells the laptop to listen for traffic on each and every network card we have be 
-    # it Wi-Fi or Ethernet etc. on the port 53317 as that's defined as a constant.
-
-    # server.listen(1) basically turns the socket into a listening server where it allows a queue of 1 device to wait in line if the server is
-    # busy processing another connection.
-
-    print(f"Direct secure tunnel listening on port {PORT}...")
-
-    while True:
-        conn, addr = server.accept()
-        # This is a block function i.e. it freezes the script and goes to sleep basically the second the android node connects on port 53317 then the script wakes up again
-        # 'conn' contains a new dedicated socket object to talk to the android connection
-        # 'addr' contains the android's ip address so it knows who is on the other end (android node).
-        try:
-            # Sockets recieve raw bytes, reading upto 4096 bytes
-            encrypted_data = conn.recv(4096)
-            # It reads the incoming data stream from the android phone, there is a temporary limit set of 4096 bytes at a time (roughly 600-800 words).
-
-            if encrypted_data:
-                print(f"Recieved encrypted payload from {addr[0]}")
-
-                plaintext = decrypt_incoming_payload(aes_key, encrypted_data)
-                # If the data actually arrives we give to decrypt_incoming_payload with the aes key we have
-
-                if plaintext:
-                    print(f"Decrypted Payload: '{plaintext}'")
-                    save_to_db(plaintext, "android")
-                    # If decryption is successful, then we log in SQLite by the save_to_db(,) function and also adds a android tag to mark where it came from
-
-                    pyperclip.copy(plaintext)
-                    # This then copies the decrypted plain text we have onto the windows system clipboard
-
-                    print("Successfully updated local clipboard with the new data!")
-        except Exception as e:
-            print(f"Tunnel Error: {e}")
-        finally:
-            conn.close()
-            # Since TCP connectios take up system memory it's important to clos the connection once the data is recieved and copied to the clipboard. Furthermore
-            # the flow will then cycle back to the top and wait at server.accept() to wait for the next time we copy something on our phone.
-
-# def send_secure_payload(target_ip, aes_key, plaintext_data):
-#     """
-#     Encrypts data using AES-GCM and pushes it directly to the target node.
-#     """
-#     try:
-#         aesgcm = AESGCM(aes_key) # Initializing AES-GCM with our shared key
-#         nonce = os.urandom(12) # Generating a random 12-byte nonce (Number used ONCE) for this specific message
-#         encrypted_payload = aesgcm.encrypt(nonce, plaintext_data.encode('utf-8'), None) # Encrypting the plaintext string
-#         final_packet = nonce + encrypted_payload # Packaging the nonce and the encrypted data together (reciever needs nonce to decrpyt it)
-        
-#         # print(f"[DEBUG] Opening TCP Socket to {target_ip}:{PORT}")
-#         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #Opening an outbound TCP socket connection
-#         client_socket.settimeout(5) #Not hanging forever if the target drops.
-
-#         print(f"Connecting directly to target node at {target_ip}:{PORT}...")
-#         client_socket.connect((target_ip, PORT)) #Connecting to the target's IP and the agreed upon port number
-
-#         print("[DEBUG] Socket Connected! Pushing Bytes")
-
-#         print(f"[DEBUG] Sending {len(final_packet)} bytes over TCP.")
-#         client_socket.sendall(final_packet) # Streaming raw bytes
-        
-#         receipt = client_socket.recv(1024).decode('utf-8')
-
-#         if receipt == "DESYNC":
-#             print("\n[DESYNC!!] Android rejected the AES Key, Keys out of synchronization")
-#             print("Initiating Handshake protocol again")
-#             time.sleep(3)
-#             os.execl(sys.executable, sys.executable, *sys.argv)
-
-#         elif receipt == "OK":
-#             print("Successfully sent payload to android")
-            
-#         else:
-#             print(f"Payload sent, however, unknown receipt encountered: {receipt}")
-
-#     except ConnectionRefusedError:
-#         print("[DESYNC] Client refused to connect! Android closed the door.")
-#         print("Android might be requesting new E2EE keys.")
-#         time.sleep(3)
-#         os.execl(sys.executable, sys.executable, *sys.argv)
-
-#     except Exception as e:
-#         print(f"Failed to send data to target: {e}")
-#     finally:
-#         client_socket.close()
-
-def monitor_clipboard_and_send(target_ip, aes_key):
-    """
-    Continuously monitors the clipboard for changes and sends new data to the target.
-    """
-    last_clipboard_content = pyperclip.paste()
-    # The script saves the content currently on the windows clipboard in the variable
-    # this is done since else the script would be assuming whatever was last on the clipboard is new content and send it to the phone as soon as the script starts fresh even. 
-    while True:
-        try:
-            current_content = pyperclip.paste()
-            # every time the loop goes it grabs a fresh copy of the windows clipboard
-
-            # If clipboard has text, and it's diffrent than the last thing we checked
-            if current_content and current_content != last_clipboard_content:
-                # it checks if the clipboard isn't empty and also that the last clipboard content isn't the same as the current one
-
-                print(f"\n New Clipboard text detected: '{current_content[:20]}'")
-                save_to_db(current_content, "laptop")
-                # saves the clipboard content into the data and tags it with 'laptop' to indicate it was copied off the laptop's clipboard
-                
-                # print("[DEBUG] Attempting to send payload to Android...")
-                send_secure_payload(target_ip, aes_key, current_content)
-                # triggers the outgoing network function to encrypt the clipboard's current content and send it to the android phone
-                # print("[DEBUG] Payload Sent Completed!")
-
-                last_clipboard_content = current_content
-                # overwriting the previously saved content with current one so the loop goes on ;)
-        except Exception as e:
-            pass # Completely ignoring clipboard lock errors thrown by Windows sometimes #TODO:
-
-        time.sleep(1.5) #Checking the clipboard every 1.5 seconds, can be adjusted for more or less sensitivity
+#         print(f"Database Error: {e}")
 
 def main():
 
     print("-----Starting a OmniSync Node-----")
+
+    crypto = CryptoEngine()
+    signaler = DweetClient("omnisync-default-fallback-channel", "laptop", "android")
+    network = SecureTunnel(53317)
+    clipboard = ClipboardManager()
+
+    print(f"My Local IP: {network.local_ip}")
+
+    signaler.broadcast_presence(network.local_ip, crypto.public_key_base64)
     
-    print("Initializing SQLite History Database...")
-    init_db()
+    target_ip, target_public_key = signaler.listen_for_target()
 
-    print(f"Using Channel ID: {SYNC_CHANNEL}...")
+    crypto.derive_shared_key(target_public_key)
 
-    local_ip = get_local_ip()
-    print(f"My Local IP: {local_ip}")
+    client_socket, encrypted_bytes = network.await_android_handshake()
 
-    print("Generating ephemeral E2EE keys!")
-    private_key, public_key = generate_keypair()
-    broadcast_presence(local_ip, public_key)
+    if not client_socket:
+        raise ConnectionError("Failed to establish handshake with Android device. Restarting Handshake")
 
-    target_ip, target_public_key = listen_for_target()
-    print("\nSUCCESSS! Phase 1: Handshake Complete!")
-    
-    print("Computing shared E2EE encryption key...")
+    try:
+        decrypted_message = crypto.decrypt_payload(encrypted_bytes)
 
-    print(f"\n[DEBUG] Current Python Public Key: {public_key}")
-    print(f"\n[DEBUG] Current ANDROID Public Key: {target_public_key}")
+        if decrypted_message == "READY":
+            print("Android is Perfectly Synced!")
 
-    aes_key = derive_shared_key(private_key, target_public_key)
-    print("Cryptographic key successfully locked in memory.")
+            encrypted_ack = crypto.encrypt_payload("SYNC_ACK")
+            network.reply_to_handshake(client_socket, encrypted_ack)
+    except Exception as e:
+        raise ValueError(f"Communication Intercepted: {e}.")
 
-    listener_thread = threading.Thread(
-        target=start_p2p_listener, 
-        args=(aes_key,), 
-        daemon=True
-        )
+    print("\n---    TUNNEL LOCKED. MONITORING CLIPBOARD     ---")
 
-    # This basically build a new thread that is assigns a seperate task to the processor to tell 
-    # it to give the new task it's own memory space and processor time. It tells the new thread to run the start_p2p_listener function and then
-    # the args argument basically contains the argument that are to be passed tothe function itself and deaomon = True basically closes this thread as soon as the main script closes.
-    listener_thread.start()
-    
-    monitor_clipboard_and_send(target_ip, aes_key)
+    while True:
+        try:
+
+            new_text = clipboard.get_new_text()
+
+            if new_text:
+                print(f"New Clipboard text detected: {new_text[:15]}...")
+
+                encrypted_data = crypto.encrypt_payload(new_text)
+
+                network.send_payload(target_ip, encrypted_data)
+        except Exception as e:
+            print(f"[ERROR] Main loop crashed: {e}")
+        
+        time.sleep(1.5)
+
 
 if __name__ == "__main__":
     main()
