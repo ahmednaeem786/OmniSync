@@ -1,6 +1,8 @@
 import json
 import os
+import socket
 from pathlib import Path
+
 
 import websocket
 from dotenv import load_dotenv
@@ -26,8 +28,9 @@ class CloudListener:
         try:
             data = json.loads(message)
             text = data.get("text")
+            device = data.get("device")
 
-            if text:
+            if text and device != socket.gethostname():
                 print(f"\n[WEBSOCKET] Recieved live clipboard data from the cloud: {text}")
                 self.clipboard.write_from_android(text)
         

@@ -25,7 +25,7 @@ class CloudAPI:
             "Content-Type": "application/json"
         }
 
-        self.endpoint = f"{os.getenv('SERVER_URL')}/api/clipboard"
+        self.endpoint = f"{os.getenv('SERVER_URL')}/api/clips"
 
     def send_clipboard_data(self, text):
 
