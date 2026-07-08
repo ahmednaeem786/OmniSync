@@ -1,21 +1,20 @@
-import os
 import time
+import threading
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
-from core.crypto import CryptoEngine
-from core.signaling import DweetClient
-from core.network import SecureTunnel
-from core.clipboard import ClipboardManager
 
-load_dotenv()
+ROOT = Path(__file__).resolve().parents[1]
 
-SYNC_CHANNEL = os.getenv("OMNISYNC_CHANNEL", "omnisync-default-fallback-channel")
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-SIGNALING_SERVER = os.getenv("SIGNALING_SERVER", "https://dweet.cc")
+load_dotenv(ROOT / ".env")
 
-MY_ROLE = "laptop"
-TARGET_ROLE = "android" # bubye apple, sorry you're too restrictive atp :((((( i tried my best but not worth the headache of dealing with a swift app :( cya
+from network.api_client import CloudAPI  # noqa: E402
+from os_tools.clipboard import ClipboardManager  # noqa: E402
+from network.ws_listener import CloudListener  # noqa: E402
 
-PORT = 53317
 
 # def init_db():
 #     """
@@ -52,55 +51,32 @@ PORT = 53317
 
 def main():
 
-    print("-----Starting a OmniSync Node-----")
+    print("-----Starting a OmniSync Cloud Node-----")
 
-    crypto = CryptoEngine()
-    signaler = DweetClient("omnisync-default-fallback-channel", "laptop", "android")
-    network = SecureTunnel(53317)
     clipboard = ClipboardManager()
+    api_client = CloudAPI()
+    ws_listener = CloudListener(clipboard)
 
-    print(f"My Local IP: {network.local_ip}")
+    threading.Thread(target=ws_listener.start, daemon=True).start()
 
-    signaler.broadcast_presence(network.local_ip, crypto.public_key_base64)
-    
-    target_ip, target_public_key = signaler.listen_for_target()
-
-    crypto.derive_shared_key(target_public_key)
-
-    client_socket, encrypted_bytes = network.await_android_handshake()
-
-    if not client_socket:
-        raise ConnectionError("Failed to establish handshake with Android device. Restarting Handshake")
-
-    try:
-        decrypted_message = crypto.decrypt_payload(encrypted_bytes)
-
-        if decrypted_message == "READY":
-            print("Android is Perfectly Synced!")
-
-            encrypted_ack = crypto.encrypt_payload("SYNC_ACK")
-            network.reply_to_handshake(client_socket, encrypted_ack)
-    except Exception as e:
-        raise ValueError(f"Communication Intercepted: {e}.")
-
-    print("\n---    TUNNEL LOCKED. MONITORING CLIPBOARD     ---")
+    print("---Connected to Cloud. Monitoring Clipboard")
 
     while True:
         try:
-
             new_text = clipboard.get_new_text()
 
             if new_text:
-                print(f"New Clipboard text detected: {new_text[:15]}...")
+                print(f"\n[LAPTOP] Copied new text: {new_text}")
 
-                encrypted_data = crypto.encrypt_payload(new_text)
+                api_client.send_clipboard_data(new_text)
 
-                network.send_payload(target_ip, encrypted_data)
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            break
         except Exception as e:
-            print(f"[ERROR] Main loop crashed: {e}")
-        
-        time.sleep(1.5)
+            print(f"[LAPTOP] Error: {e}")
 
+        time.sleep(2)
 
 if __name__ == "__main__":
     main()

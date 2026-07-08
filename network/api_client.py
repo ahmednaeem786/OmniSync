@@ -1,9 +1,12 @@
-import requests
-import socket
 import os
+import socket
+from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env")
 
 
 """

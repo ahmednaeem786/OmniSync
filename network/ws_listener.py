@@ -1,9 +1,12 @@
 import json
-import websocket
 import os
+from pathlib import Path
+
+import websocket
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env")
 
 """
 Job: It is completely responsible for pulling data down from the cloud.
@@ -39,7 +42,6 @@ class CloudListener:
         print(f"Opening secure WebSocket tunnel to {os.getenv('WS_URL')}")
 
         ws = websocket.WebSocketApp(
-            
             os.getenv('WS_URL'),
             header=self.headers,
             on_message=self._on_message,

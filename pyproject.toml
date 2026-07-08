@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omnisync"
+version = "0.1.0"
+description = "OmniSync clipboard sync tool"
+requires-python = ">=3.9"
+dependencies = [
+  "python-dotenv",
+  "websocket-client",
+  "requests",
+  "pyperclip",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["laptop_node*", "network*"]
